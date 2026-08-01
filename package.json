@@ -1,0 +1,26 @@
+{
+  "name": "eitf-hrms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Enterprise HRMS & Payroll Platform — EITF Enhancing IT Infrastructure Pvt. Ltd.",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:api": "npm run start:dev -w @eitf/api",
+    "dev:web": "npm run dev -w @eitf/web",
+    "dev:mobile": "npm run start -w @eitf/mobile",
+    "build:api": "npm run build -w @eitf/api",
+    "build:web": "npm run build -w @eitf/web",
+    "db:generate": "npm run prisma:generate -w @eitf/api",
+    "db:migrate": "npm run prisma:migrate -w @eitf/api",
+    "db:seed": "npm run prisma:seed -w @eitf/api",
+    "db:studio": "npm run prisma:studio -w @eitf/api",
+    "db:up": "node scripts/start-embedded-pg.mjs",
+    "lint": "npm run lint -w @eitf/api & npm run lint -w @eitf/web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

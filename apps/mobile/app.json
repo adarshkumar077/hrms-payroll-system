@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "EITF HRMS",
+    "slug": "eitf-hrms",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "eitf-hrms",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.eitf.hrms",
+      "buildNumber": "1"
+    },
+    "android": {
+      "package": "com.eitf.hrms",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#1a6b54"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "replace-with-eas-project-id"
+      }
+    },
+    "plugins": ["expo-router"]
+  }
+}

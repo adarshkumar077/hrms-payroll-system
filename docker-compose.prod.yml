@@ -1,0 +1,105 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: eitf-hrms-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-eitf}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eitf_prod_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-eitf_hrms}
+    volumes:
+      - eitf_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eitf} -d ${POSTGRES_DB:-eitf_hrms}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: eitf-hrms-redis
+    restart: unless-stopped
+    volumes:
+      - eitf_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: eitf-hrms-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-eitf}:${POSTGRES_PASSWORD:-eitf_prod_change_me}@postgres:5432/${POSTGRES_DB:-eitf_hrms}?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-eitf-prod-access-secret-change-me-32chars}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-eitf-prod-refresh-secret-change-me-32chars}
+      JWT_ACCESS_TTL: 15m
+      JWT_REFRESH_TTL: 7d
+      API_PORT: 3001
+      API_PREFIX: api/v1
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      LOCAL_STORAGE_DIR: /app/apps/api/uploads
+    volumes:
+      - eitf_uploads:/app/apps/api/uploads
+      - eitf_backups:/app/apps/api/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: eitf-hrms-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      API_INTERNAL_URL: http://api:3001
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  proxy:
+    image: caddy:2-alpine
+    container_name: eitf-hrms-proxy
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    ports:
+      - "${PUBLIC_PORT:-8080}:80"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  eitf_postgres_data:
+  eitf_redis_data:
+  eitf_uploads:
+  eitf_backups:

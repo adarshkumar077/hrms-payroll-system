@@ -1,0 +1,11 @@
+:80 {
+	# Single public entrypoint — tunnels/reverse proxies hit this port.
+	# /api/* → Nest API, everything else → Next.js web
+	handle /api/* {
+		reverse_proxy api:3001
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}
