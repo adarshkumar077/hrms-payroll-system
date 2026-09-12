@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, TextInput, Alert, ScrollView } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+import { API_URL } from '../lib/api';
 
 type LeaveType = { id: string; code: string; name: string };
 type Balance = { available: number; leaveType: LeaveType };

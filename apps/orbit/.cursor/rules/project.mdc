@@ -1,0 +1,8 @@
+---
+description: Orbit Business OS — entry point for all work
+alwaysApply: true
+---
+
+Read `AGENTS.md` first. Load `docs/ai/` files on demand per its INDEX table when the task matches.
+
+Before ending any session where code changed: update `docs/ai/STATE.md`, and if a decision was made, append it to `docs/ai/DECISIONS.md`.

@@ -13,25 +13,25 @@ export class HolidaysController {
   constructor(private readonly holidays: HolidaysService) {}
 
   @Get('holidays')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.ADMIN, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   list(@CurrentUser() user: AuthUser, @Query('year') year?: string) {
     return this.holidays.list(user.companyId, year ? Number(year) : undefined);
   }
 
   @Post('holidays')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateHolidayDto) {
     return this.holidays.create(user.companyId, user.id, dto);
   }
 
   @Put('holidays/:id')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateHolidayDto) {
     return this.holidays.update(user.companyId, user.id, id, dto);
   }
 
   @Delete('holidays/:id')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.holidays.remove(user.companyId, user.id, id);
   }
@@ -47,7 +47,7 @@ export class HolidaysController {
   }
 
   @Get('employees/:employeeId/holidays')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   employeeCalendar(
     @CurrentUser() user: AuthUser,
     @Param('employeeId') employeeId: string,

@@ -40,7 +40,7 @@ export default function TicketsPage() {
       return;
     }
     setHasEmployee(!!u.employeeId);
-    setIsHr(u.roles.some((r) => ['CEO', 'HR', 'MANAGER'].includes(r)));
+    setIsHr(u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r)));
     load();
   }, [router]);
 
@@ -102,7 +102,7 @@ export default function TicketsPage() {
       {hasEmployee && (
         <section className="bg-white/80 border border-brand-100 rounded-lg p-4 mb-6 text-sm space-y-2">
           <select className="border border-mist rounded px-2 py-2 w-full" value={category} onChange={(e) => setCategory(e.target.value)}>
-            {['HR', 'IT', 'FINANCE', 'ADMIN'].map((c) => (
+            {['HR', 'IT', 'ADMIN', 'ADMIN'].map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>

@@ -78,7 +78,7 @@ export default function SecuritySettingsPage() {
       router.replace('/account/password?required=true');
       return;
     }
-    if (!u.roles.includes('CEO')) {
+    if (!u.roles.includes('SUPER_ADMIN')) {
       router.replace('/dashboard');
       return;
     }

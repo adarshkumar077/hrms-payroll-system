@@ -55,8 +55,8 @@ export default function PayrollRunPage() {
       router.replace('/');
       return;
     }
-    setCanApprove(u.roles.some((r) => ['CEO', 'FINANCE'].includes(r)));
-    setCanMarkPaid(u.roles.some((r) => ['CEO', 'HR', 'FINANCE'].includes(r)));
+    setCanApprove(u.roles.some((r) => ['SUPER_ADMIN', 'ADMIN'].includes(r)));
+    setCanMarkPaid(u.roles.some((r) => ['SUPER_ADMIN', 'ADMIN', 'HR'].includes(r)));
     load();
   }, [router, id]);
 

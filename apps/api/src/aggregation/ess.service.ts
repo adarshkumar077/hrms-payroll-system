@@ -12,6 +12,7 @@ import { EmployeesService } from '../employees/employees.service';
 import { ApplyLeaveDto } from '../leave/dto/leave.dto';
 import { MarkAttendanceDto } from '../attendance/dto/attendance.dto';
 import { UpdateMyProfileDto } from '../employees/dto/employee.dto';
+import { sanitizeAttendanceRecords } from '../attendance/attendance-privacy';
 
 @Injectable()
 export class EssService {
@@ -38,7 +39,7 @@ export class EssService {
       orderBy: { date: 'asc' },
     });
     const counters = await this.attendance.mySummary(user, y, m);
-    return { year: y, month: m, records, counters };
+    return { year: y, month: m, records: sanitizeAttendanceRecords(records, false), counters };
   }
 
   markAttendance(user: AuthUser, dto: MarkAttendanceDto) {

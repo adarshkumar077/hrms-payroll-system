@@ -1,8 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { Prisma, RoleCode, AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportsService } from '../reports/reports.service';
+import { AuditService } from '../audit/audit.service';
+import { AuthUser } from '../auth/decorators/current-user.decorator';
 
 @Injectable()
 export class AiService {
@@ -12,39 +14,307 @@ export class AiService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly reports: ReportsService,
+    private readonly audit: AuditService,
   ) {}
 
-  async chat(companyId: string, userId: string, message: string, employeeId?: string | null) {
+  suggestedPrompts(roles: string[]) {
+    const base = [
+      'Explain our leave policy and how to apply.',
+      'How is overtime calculated on attendance?',
+      'Why might my payslip net be lower this month?',
+    ];
+    if (roles.includes(RoleCode.HR) || roles.includes(RoleCode.SUPER_ADMIN) || roles.includes(RoleCode.ADMIN)) {
+      return [
+        ...base,
+        'Summarize this month attendance risk.',
+        'What payroll deductions apply company-wide?',
+      ];
+    }
+    return [...base, 'Show my leave balance guidance.', 'How do I mark attendance with GPS?'];
+  }
+
+  async chat(
+    user: AuthUser,
+    message: string,
+    opts?: { conversationId?: string; regenerate?: boolean },
+  ) {
     const trimmed = message?.trim();
     if (!trimmed) {
       return { reply: 'Please select a topic or type your question.', engine: 'rules' as const };
     }
+    const started = Date.now();
+    const conversation = await this.ensureConversation(user, opts?.conversationId, trimmed);
+    const engine = this.config.get('OPENAI_API_KEY') ? 'openai' : 'rules';
 
-    try {
-      await this.prisma.aiChatMessage.create({
-        data: { companyId, userId, role: 'user', content: trimmed },
+    if (!opts?.regenerate) {
+      await this.prisma.aiMessage.create({
+        data: { conversationId: conversation.id, role: 'user', content: trimmed },
       });
-    } catch (err) {
-      this.logger.warn(`Failed to persist user chat message: ${err}`);
     }
 
-    const reply = await this.generateReply(companyId, trimmed, employeeId);
-
+    let reply: string;
+    let status = 'OK';
+    let errorMessage: string | null = null;
     try {
-      await this.prisma.aiChatMessage.create({
+      reply = await this.generateReply(user.companyId, trimmed, user.employeeId, user.roles);
+    } catch (err) {
+      status = 'ERROR';
+      errorMessage = err instanceof Error ? err.message : 'AI error';
+      reply = 'I could not complete that request. Please try again or contact HR.';
+    }
+
+    await this.prisma.aiMessage.create({
+      data: {
+        conversationId: conversation.id,
+        role: 'assistant',
+        content: reply,
+        meta: { engine, regenerated: Boolean(opts?.regenerate) },
+      },
+    });
+    await this.prisma.aiChatMessage.create({
+      data: { companyId: user.companyId, userId: user.id, role: 'assistant', content: reply, meta: { engine } },
+    }).catch(() => undefined);
+
+    const latencyMs = Date.now() - started;
+    await this.recordUsage(user, conversation.id, engine, latencyMs, status, errorMessage);
+    await this.audit.log({
+      companyId: user.companyId,
+      actorId: user.id,
+      action: AuditAction.OTHER,
+      entityType: 'AiConversation',
+      entityId: conversation.id,
+      metadata: { event: 'ai.chat', status },
+    });
+
+    return {
+      reply,
+      engine,
+      conversationId: conversation.id,
+      suggested: this.suggestedPrompts(user.roles),
+    };
+  }
+
+  async listHistory(user: AuthUser) {
+    const where = this.historyWhere(user);
+    return this.prisma.aiConversation.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        title: true,
+        updatedAt: true,
+        createdAt: true,
+        userId: true,
+        _count: { select: { messages: true } },
+      },
+    });
+  }
+
+  async getHistory(user: AuthUser, id: string) {
+    const conv = await this.prisma.aiConversation.findFirst({
+      where: { id, ...this.historyWhere(user) },
+      include: { messages: { orderBy: { createdAt: 'asc' } } },
+    });
+    if (!conv) throw new NotFoundException('Conversation not found');
+    return conv;
+  }
+
+  async deleteHistory(user: AuthUser, id: string) {
+    const conv = await this.prisma.aiConversation.findFirst({
+      where: { id, ...this.historyWhere(user) },
+    });
+    if (!conv) throw new NotFoundException('Conversation not found');
+    if (!this.canManageAllConversations(user) && conv.userId !== user.id) {
+      throw new ForbiddenException();
+    }
+    await this.prisma.aiConversation.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+    await this.audit.log({
+      companyId: user.companyId,
+      actorId: user.id,
+      action: AuditAction.DELETE,
+      entityType: 'AiConversation',
+      entityId: id,
+    });
+    return { ok: true };
+  }
+
+  private canManageAllConversations(user: AuthUser) {
+    return user.roles.includes(RoleCode.SUPER_ADMIN) || user.roles.includes(RoleCode.ADMIN);
+  }
+
+  private historyWhere(user: AuthUser) {
+    const base = { companyId: user.companyId, deletedAt: null };
+    if (this.canManageAllConversations(user)) return base;
+    return { ...base, userId: user.id };
+  }
+
+  private async ensureConversation(user: AuthUser, conversationId: string | undefined, firstMessage: string) {
+    if (conversationId) {
+      const existing = await this.prisma.aiConversation.findFirst({
+        where: { id: conversationId, companyId: user.companyId, deletedAt: null },
+      });
+      if (!existing) throw new NotFoundException('Conversation not found');
+      if (!this.canManageAllConversations(user) && existing.userId !== user.id) {
+        throw new ForbiddenException();
+      }
+      await this.prisma.aiConversation.update({
+        where: { id: existing.id },
+        data: { updatedAt: new Date() },
+      });
+      return existing;
+    }
+    return this.prisma.aiConversation.create({
+      data: {
+        companyId: user.companyId,
+        userId: user.id,
+        title: firstMessage.slice(0, 72) || 'New conversation',
+      },
+    });
+  }
+
+  private async recordUsage(
+    user: AuthUser,
+    conversationId: string,
+    model: string,
+    latencyMs: number,
+    status: string,
+    errorMessage: string | null,
+  ) {
+    await this.prisma.aiLog.create({
+      data: {
+        companyId: user.companyId,
+        userId: user.id,
+        conversationId,
+        model,
+        latencyMs,
+        status,
+        errorMessage: errorMessage ?? undefined,
+      },
+    });
+    const day = new Date();
+    day.setHours(0, 0, 0, 0);
+    const existing = await this.prisma.aiUsage.findUnique({
+      where: { companyId_day: { companyId: user.companyId, day } },
+    });
+    if (!existing) {
+      await this.prisma.aiUsage.create({
         data: {
-          companyId,
-          userId,
-          role: 'assistant',
-          content: reply,
-          meta: { engine: this.config.get('OPENAI_API_KEY') ? 'openai' : 'rules' },
+          companyId: user.companyId,
+          day,
+          requests: 1,
+          errorCount: status === 'ERROR' ? 1 : 0,
+          avgLatencyMs: latencyMs,
         },
       });
-    } catch (err) {
-      this.logger.warn(`Failed to persist assistant chat message: ${err}`);
+      return;
     }
+    const requests = existing.requests + 1;
+    await this.prisma.aiUsage.update({
+      where: { id: existing.id },
+      data: {
+        requests,
+        errorCount: existing.errorCount + (status === 'ERROR' ? 1 : 0),
+        avgLatencyMs: Math.round((existing.avgLatencyMs * existing.requests + latencyMs) / requests),
+      },
+    });
+  }
 
-    return { reply, engine: this.config.get('OPENAI_API_KEY') ? 'openai' : 'rules' };
+  async ensureDefaultPrompts(companyId: string) {
+    const defaults = [
+      { category: 'Leave', title: 'Leave policy', body: 'Explain EITF leave types, balances, approval steps, and carry-forward rules.' },
+      { category: 'Payroll', title: 'Payslip breakdown', body: 'Explain CTC, LOP, ESD, PF, and how net pay is calculated.' },
+      { category: 'Attendance', title: 'Attendance & OT', body: 'Explain selfie/GPS mark, late marks, ULOB, overtime, and geofence.' },
+      { category: 'HR', title: 'Employee self-service', body: 'Guide the employee through ESS: profile, documents, leave apply, payslips.' },
+    ];
+    for (const p of defaults) {
+      const found = await this.prisma.aiPrompt.findFirst({
+        where: { companyId, title: p.title, category: p.category },
+      });
+      if (!found) {
+        await this.prisma.aiPrompt.create({ data: { companyId, ...p, isSystem: true } });
+      }
+    }
+  }
+
+  async listPrompts(companyId: string) {
+    await this.ensureDefaultPrompts(companyId);
+    return this.prisma.aiPrompt.findMany({ where: { companyId }, orderBy: [{ category: 'asc' }, { title: 'asc' }] });
+  }
+
+  async upsertPrompt(
+    user: AuthUser,
+    input: { id?: string; category: string; title: string; body: string; isActive?: boolean },
+  ) {
+    if (input.id) {
+      return this.prisma.aiPrompt.update({
+        where: { id: input.id },
+        data: { category: input.category, title: input.title, body: input.body, isActive: input.isActive ?? true },
+      });
+    }
+    return this.prisma.aiPrompt.create({
+      data: {
+        companyId: user.companyId,
+        category: input.category,
+        title: input.title,
+        body: input.body,
+        createdBy: user.id,
+      },
+    });
+  }
+
+  async deletePrompt(companyId: string, id: string) {
+    const row = await this.prisma.aiPrompt.findFirst({ where: { id, companyId } });
+    if (!row) throw new NotFoundException('Prompt not found');
+    if (row.isSystem) throw new ForbiddenException('System prompts cannot be deleted');
+    await this.prisma.aiPrompt.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  async consoleAnalytics(companyId: string) {
+    const [logs, usage, prompts] = await Promise.all([
+      this.prisma.aiLog.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' }, take: 100 }),
+      this.prisma.aiUsage.findMany({ where: { companyId }, orderBy: { day: 'desc' }, take: 30 }),
+      this.listPrompts(companyId),
+    ]);
+    const errors = logs.filter((l) => l.status !== 'OK').length;
+    const avg = logs.length ? Math.round(logs.reduce((s, l) => s + l.latencyMs, 0) / logs.length) : 0;
+    return {
+      model: this.config.get('OPENAI_MODEL') ?? 'rules-engine',
+      systemPrompt: this.config.get('AI_SYSTEM_PROMPT') ?? 'You are the EITF HRMS assistant.',
+      totals: { requests: logs.length, errors, avgLatencyMs: avg },
+      logs,
+      usage,
+      prompts,
+    };
+  }
+
+  async updateAiSettings(user: AuthUser, body: { systemPrompt?: string; model?: string }) {
+    if (body.systemPrompt != null) {
+      await this.prisma.companySetting.upsert({
+        where: { companyId_key: { companyId: user.companyId, key: 'ai.system_prompt' } },
+        create: { companyId: user.companyId, key: 'ai.system_prompt', value: body.systemPrompt, group: 'ai', updatedBy: user.id },
+        update: { value: body.systemPrompt, updatedBy: user.id },
+      });
+    }
+    if (body.model != null) {
+      await this.prisma.companySetting.upsert({
+        where: { companyId_key: { companyId: user.companyId, key: 'ai.model' } },
+        create: { companyId: user.companyId, key: 'ai.model', value: body.model, group: 'ai', updatedBy: user.id },
+        update: { value: body.model, updatedBy: user.id },
+      });
+    }
+    await this.audit.log({
+      companyId: user.companyId,
+      actorId: user.id,
+      action: AuditAction.SETTINGS_CHANGE,
+      entityType: 'AiSettings',
+      metadata: { fields: Object.keys(body) },
+    });
+    return this.consoleAnalytics(user.companyId);
   }
 
   async history(companyId: string, userId: string, limit = 40) {
@@ -64,19 +334,30 @@ export class AiService {
     companyId: string,
     message: string,
     employeeId?: string | null,
+    roles: string[] = [],
   ): Promise<string> {
     const key = this.config.get<string>('OPENAI_API_KEY');
     if (key) {
       try {
-        return await this.openAiReply(key, message);
+        return await this.openAiReply(key, message, roles);
       } catch {
         // fall through to rules
       }
     }
-    return this.rulesReply(companyId, message, employeeId);
+    return this.rulesReply(companyId, message, employeeId, roles);
   }
 
-  private async openAiReply(apiKey: string, message: string): Promise<string> {
+  private async openAiReply(apiKey: string, message: string, roles: string[]): Promise<string> {
+    const setting = await this.prisma.companySetting.findFirst({
+      where: { key: 'ai.system_prompt' },
+    });
+    const modelSetting = await this.prisma.companySetting.findFirst({
+      where: { key: 'ai.model' },
+    });
+    const system =
+      (typeof setting?.value === 'string' ? setting.value : null) ??
+      this.config.get('AI_SYSTEM_PROMPT') ??
+      `You are the EITF HRMS assistant for Enhance IT Infrastructure (EITF). Answer in Markdown about leave, attendance, payroll, and HR policies. Do not invent employee-specific balances. Role context: ${roles.join(', ') || 'EMPLOYEE'}.`;
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -84,13 +365,12 @@ export class AiService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: this.config.get('OPENAI_MODEL') ?? 'gpt-4o-mini',
+        model:
+          (typeof modelSetting?.value === 'string' ? modelSetting.value : null) ??
+          this.config.get('OPENAI_MODEL') ??
+          'gpt-4o-mini',
         messages: [
-          {
-            role: 'system',
-            content:
-              'You are the EITF HRMS assistant. Answer briefly about leave, attendance, payroll, and HR policies. Do not invent employee-specific balances.',
-          },
+          { role: 'system', content: system },
           { role: 'user', content: message },
         ],
         temperature: 0.3,
@@ -107,6 +387,7 @@ export class AiService {
     companyId: string,
     message: string,
     employeeId?: string | null,
+    roles: string[] = [],
   ): Promise<string> {
     const q = message.toLowerCase();
     const settings = await this.prisma.companySetting.findMany({
@@ -245,7 +526,7 @@ export class AiService {
         : /hr|human/.test(role)
           ? 'hr'
           : /finance|account/.test(role)
-            ? 'finance'
+            ? 'ADMIN'
             : 'default';
     const keywords = keywordsByRole[bucket];
     const hits = keywords.filter((k) => text.includes(k));

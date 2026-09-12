@@ -42,13 +42,13 @@ export default function TrainingsPage() {
       router.replace('/');
       return;
     }
-    setIsHr(u.roles.some((r) => ['CEO', 'HR'].includes(r)));
+    setIsHr(u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r)));
     setHasEmployee(!!u.employeeId);
     load();
     if (u.employeeId) {
       api<Mine[]>('/me/trainings').then(setMine).catch(() => undefined);
     }
-    if (u.roles.some((r) => ['CEO', 'HR'].includes(r))) {
+    if (u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r))) {
       api<{ items: { id: string; employeeCode: string; firstName: string }[] }>('/employees?pageSize=100&isActive=true')
         .then((r) => setEmployees(r.items ?? []))
         .catch(() => undefined);

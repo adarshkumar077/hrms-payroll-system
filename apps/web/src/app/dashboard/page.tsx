@@ -198,10 +198,9 @@ export default function DashboardPage() {
 
     const r = monthRange(new Date());
     const admin = isAdmin(u);
-    const ceoRole = ['CEO', 'HR', 'FINANCE'].some((x) => u.roles.includes(x));
-    const ceoAi = ['CEO', 'HR'].some((x) => u.roles.includes(x));
-    const payrollAi = ['CEO', 'HR', 'FINANCE'].some((x) => u.roles.includes(x));
-
+    const ceoRole = ['SUPER_ADMIN', 'HR', 'ADMIN'].some((x) => u.roles.includes(x));
+    const ceoAi = ['SUPER_ADMIN', 'HR'].some((x) => u.roles.includes(x));
+    const payrollAi = ['SUPER_ADMIN', 'HR', 'ADMIN'].some((x) => u.roles.includes(x));
     Promise.allSettled([
       admin ? api<HrDash>('/dashboard/hr') : api<EmpDash>('/dashboard/employee'),
       admin && ceoRole ? api<CeoDash>('/dashboard/ceo') : Promise.resolve(null),
@@ -770,6 +769,8 @@ export default function DashboardPage() {
                   { href: '/employees', label: 'Employee Management', icon: 'users' },
                   { href: '/leave/approvals', label: 'Leave Approvals', icon: 'leave' },
                   { href: '/payroll', label: 'Payroll Processing', icon: 'payroll' },
+                  { href: '/assistant', label: 'EITF AI Assistant', icon: 'assistant' },
+                  { href: '/studio', label: 'Studio', icon: 'studio' },
                   { href: '/security', label: 'Security Settings', icon: 'security' },
                 ].map((a) => (
                   <Link
@@ -933,6 +934,8 @@ export default function DashboardPage() {
                   { href: '/employees', label: 'Employees', icon: 'users' },
                   { href: '/attendance', label: 'Attendance Console', icon: 'attendance' },
                   { href: '/payroll', label: 'Payroll Processing', icon: 'payroll' },
+                  { href: '/assistant', label: 'EITF AI Assistant', icon: 'assistant' },
+                  { href: '/documents', label: 'Documents', icon: 'documents' },
                   { href: '/assets', label: 'Assets', icon: 'assets' },
                 ].map((a) => (
                   <Link
@@ -1024,6 +1027,12 @@ export default function DashboardPage() {
                 </Link>
                 <Link href="/payroll/payslips" className="btn-secondary inline-flex">
                   Payslips
+                </Link>
+                <Link href="/assistant" className="btn-secondary inline-flex">
+                  EITF AI Assistant
+                </Link>
+                <Link href="/documents" className="btn-secondary inline-flex">
+                  Documents
                 </Link>
               </div>
             </Card>

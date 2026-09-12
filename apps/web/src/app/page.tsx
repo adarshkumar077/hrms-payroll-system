@@ -339,10 +339,12 @@ export default function LoginPage() {
                   required
                   minLength={3}
                   autoComplete="username"
-                  placeholder="SA001 (admin) or EITF016 (employee)"
+                  placeholder="admin, hr001, or emp001"
                 />
                 <p className="text-xs text-ink-400 mt-1.5">
-                  Use User ID like <strong>SA001</strong> or Employee Code like <strong>EITF016</strong> — not words such as admin/employee.
+                  Use User ID (<strong>admin</strong>, <strong>hr001</strong>, <strong>emp001</strong>),
+                  employee code (<strong>ADM001</strong>, <strong>HR001</strong>, <strong>EMP001</strong>),
+                  or email.
                 </p>
               </label>
               <label className="block">
@@ -392,6 +394,14 @@ export default function LoginPage() {
           >
             Clear local session
           </button>
+          {process.env.NODE_ENV !== 'production' && (
+            <div className="mt-4 text-xs text-ink-500 bg-white/80 border border-ink-100 rounded-xl px-3 py-2.5 space-y-1">
+              <p className="font-medium text-ink-700">Demo accounts</p>
+              <p>Admin — <span className="font-mono">admin</span> / Admin@123</p>
+              <p>HR — <span className="font-mono">hr001</span> / HR@123</p>
+              <p>Employee — <span className="font-mono">emp001</span> / Emp@123</p>
+            </div>
+          )}
           </>
           )}
         </div>

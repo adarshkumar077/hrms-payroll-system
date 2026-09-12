@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, TextInput, Alert, ScrollView } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+import { API_URL } from '../lib/api';
 
 type Claim = { id: string; category: string; amount: number; status: string };
 
@@ -44,7 +44,7 @@ export default function ExpensesScreen() {
       Alert.alert('Error', data.message ?? 'Failed');
       return;
     }
-    Alert.alert('Submitted', 'Pending HR + CEO approval');
+    Alert.alert('Submitted', 'Pending HR approval');
     load();
   }
 

@@ -78,6 +78,7 @@ export const DEFAULT_COMPANY_SETTINGS: SettingDef[] = [
 
   // Geo / methods
   { key: 'attendance.methods_enabled', label: 'Enabled attendance methods', group: 'attendance', value: ['MANUAL', 'SELFIE', 'WEB', 'GPS'] },
+  { key: 'attendance.ot_multiplier', label: 'Overtime pay multiplier', group: 'attendance', value: 1.5 },
   { key: 'attendance.geofence_lat', label: 'Office geofence latitude', group: 'attendance', value: 0 },
   { key: 'attendance.geofence_lng', label: 'Office geofence longitude', group: 'attendance', value: 0 },
   { key: 'attendance.geofence_radius_m', label: 'Geofence radius (meters)', group: 'attendance', value: 200 },

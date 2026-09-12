@@ -1,14 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState, useMemo } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { api, getStoredUser, getToken, getApiBaseUrl } from '@/lib/api';
-
-
+import { canManageAttendance } from '@/lib/roles';
 
 type Row = {
-  employee: { id: string; employeeCode: string; firstName: string; lastName?: string | null; department?: string | null };
+  employee: {
+    id: string;
+    employeeCode: string;
+    firstName: string;
+    lastName?: string | null;
+    department?: string | null;
+  };
   record: {
     status: string;
     checkInAt?: string | null;
@@ -16,6 +21,40 @@ type Row = {
     isLate: boolean;
     lateMinutes: number;
     method?: string | null;
+    selfieUrl?: string | null;
+    checkInSelfieUrl?: string | null;
+    checkOutSelfieUrl?: string | null;
+    checkInAddress?: string | null;
+    checkOutAddress?: string | null;
+    checkInMapsUrl?: string | null;
+    checkOutMapsUrl?: string | null;
+    checkInLatitude?: number | null;
+    checkInLongitude?: number | null;
+    checkOutLatitude?: number | null;
+    checkOutLongitude?: number | null;
+    workMinutes?: number | null;
+    overtimeMinutes?: number;
+    todaysEarnings?: number | null;
+    checkOutSource?: string | null;
+    checkOutLabel?: string | null;
+  } | null;
+};
+
+type RecordDetail = {
+  employee: { id: string; employeeCode: string; firstName: string; lastName?: string | null };
+  date: string;
+  record: Row['record'] & { id?: string } | null;
+  punches: unknown[];
+  auditLogs: { id: string; action: string; createdAt: string; note?: string | null }[];
+  formatted: {
+    inTime: string;
+    outTime: string;
+    inLocation: string;
+    outLocation: string;
+    workingHours: string;
+    overtime: string;
+    checkOutSource?: string | null;
+    checkOutLabel?: string | null;
   } | null;
 };
 
@@ -39,9 +78,76 @@ const MONTHS = [
 
 type ViewTab = 'daily' | 'monthly' | 'yearly';
 
+function shortLocation(address?: string | null): string {
+  if (!address?.trim()) return '—';
+  const parts = address
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return '—';
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]}, ${parts[1]}`;
+}
+
+function mapsEmbedUrl(mapsUrl?: string | null, lat?: number | null, lng?: number | null): string | null {
+  if (lat != null && lng != null) {
+    return `https://maps.google.com/maps?q=${lat},${lng}&z=15&output=embed`;
+  }
+  if (mapsUrl) {
+    try {
+      const u = new URL(mapsUrl);
+      const q = u.searchParams.get('q');
+      if (q) return `https://maps.google.com/maps?q=${encodeURIComponent(q)}&z=15&output=embed`;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+function toDatetimeLocal(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function datetimeLocalToIso(value: string): string | undefined {
+  if (!value.trim()) return undefined;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString();
+}
+
+function punchedAtForDate(dateStr: string, localDateTime: string): string {
+  const fromInput = datetimeLocalToIso(localDateTime);
+  if (fromInput) return fromInput;
+  const now = new Date();
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), 0).toISOString();
+}
+
 export default function AttendanceConsolePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="max-w-6xl mx-auto px-4 py-10">
+          <p className="text-sm text-ink/50">Loading attendance…</p>
+        </main>
+      }
+    >
+      <AttendanceConsoleInner />
+    </Suspense>
+  );
+}
+
+function AttendanceConsoleInner() {
   const router = useRouter();
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const searchParams = useSearchParams();
+  const [date, setDate] = useState(
+    searchParams.get('date') ?? new Date().toISOString().slice(0, 10),
+  );
   const [rows, setRows] = useState<Row[]>([]);
   const [counters, setCounters] = useState<
     { lateMarkCount: number; ulobCount: number; employee: { employeeCode: string; firstName: string } }[]
@@ -54,6 +160,14 @@ export default function AttendanceConsolePage() {
   const [filterDepartment, setFilterDepartment] = useState('');
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+  const [detail, setDetail] = useState<RecordDetail | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [canManage, setCanManage] = useState(false);
+  const [editStatus, setEditStatus] = useState('P');
+  const [editIn, setEditIn] = useState('');
+  const [editOut, setEditOut] = useState('');
+  const [editNote, setEditNote] = useState('');
+  const [saving, setSaving] = useState(false);
 
   function load(d = date) {
     api<Row[]>(`/attendance/console?date=${d}`)
@@ -64,17 +178,37 @@ export default function AttendanceConsolePage() {
       .catch(() => setCounters([]));
   }
 
+  async function openDetail(employeeId: string, d: string) {
+    setError('');
+    try {
+      const res = await api<RecordDetail>(`/attendance/records/${employeeId}/${d}`);
+      setDetail(res);
+      setEditStatus(res.record?.status ?? 'P');
+      setEditIn(toDatetimeLocal(res.record?.checkInAt));
+      setEditOut(toDatetimeLocal(res.record?.checkOutAt));
+      setEditNote('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load detail');
+    }
+  }
+
   useEffect(() => {
     const u = getStoredUser();
     if (!u) {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => ['CEO', 'HR', 'ADMIN'].includes(r))) {
+    if (!u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r))) {
       router.replace('/dashboard');
       return;
     }
+    setCanManage(canManageAttendance(u));
     load();
+    const empId = searchParams.get('employeeId');
+    const d = searchParams.get('date');
+    if (empId && d) {
+      openDetail(empId, d);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
@@ -87,8 +221,61 @@ export default function AttendanceConsolePage() {
       });
       setMessage('Corrected');
       load();
+      if (detail?.employee.id === employeeId) await openDetail(employeeId, date);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Correction failed');
+    }
+  }
+
+  async function saveCorrection() {
+    if (!detail || !canManage) return;
+    setSaving(true);
+    setMessage('');
+    setError('');
+    try {
+      await api(`/attendance/${detail.employee.id}/${detail.date}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          status: editStatus,
+          checkInAt: datetimeLocalToIso(editIn),
+          checkOutAt: datetimeLocalToIso(editOut),
+          correctionNote: editNote.trim() || `HR/Super Admin correction to ${editStatus}`,
+          method: 'MANUAL',
+        }),
+      });
+      setMessage('Attendance updated');
+      load(detail.date);
+      await openDetail(detail.employee.id, detail.date);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Update failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function manualPunch(punchType: 'IN' | 'OUT') {
+    if (!detail || !canManage) return;
+    setSaving(true);
+    setMessage('');
+    setError('');
+    try {
+      await api('/attendance/manual', {
+        method: 'POST',
+        body: JSON.stringify({
+          employeeId: detail.employee.id,
+          punchType,
+          method: 'MANUAL',
+          punchedAt: punchedAtForDate(detail.date, punchType === 'IN' ? editIn : editOut),
+          note: editNote.trim() || `HR/Super Admin manual ${punchType}`,
+        }),
+      });
+      setMessage(`Marked ${punchType}`);
+      load(detail.date);
+      await openDetail(detail.employee.id, detail.date);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `Mark ${punchType} failed`);
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -171,15 +358,44 @@ export default function AttendanceConsolePage() {
     }
   }
 
+  const inEmbed = detail?.record
+    ? mapsEmbedUrl(
+        detail.record.checkInMapsUrl,
+        detail.record.checkInLatitude,
+        detail.record.checkInLongitude,
+      )
+    : null;
+  const outEmbed =
+    detail?.record && detail.record.checkOutSource !== 'SYSTEM_LOGOUT'
+      ? mapsEmbedUrl(
+          detail.record.checkOutMapsUrl,
+          detail.record.checkOutLatitude,
+          detail.record.checkOutLongitude,
+        )
+      : null;
+
   return (
     <main className="max-w-6xl mx-auto px-4 py-10">
       <Link href="/dashboard" className="text-sm text-brand-600 hover:underline">
         ← Dashboard
       </Link>
       <h1 className="font-display text-3xl text-brand-700 mt-2">Attendance Console</h1>
-      <p className="text-sm text-ink/60 mb-4">Daily grid · late marks · ULOB counters (from company settings)</p>
+      <p className="text-sm text-ink/60 mb-4">
+        Daily grid · late marks · ULOB counters
+        {canManage
+          ? ' · HR / Super Admin can mark, edit, and correct any employee'
+          : ' · view only'}
+      </p>
 
-      {/* View Tabs */}
+      <div className="flex flex-wrap gap-3 mb-4 text-sm">
+        <Link href="/attendance/sheet" className="text-brand-600 underline">
+          Attendance Sheet
+        </Link>
+        <Link href="/attendance/mark" className="text-brand-600 underline">
+          Web check-in
+        </Link>
+      </div>
+
       <div className="flex gap-1 mb-4 bg-mist/30 rounded-lg p-1 w-fit">
         {(['daily', 'monthly', 'yearly'] as const).map((tab) => (
           <button
@@ -195,7 +411,6 @@ export default function AttendanceConsolePage() {
         ))}
       </div>
 
-      {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-4 items-end">
         <div className="flex flex-col gap-1">
           <label className="text-xs text-ink/60">Employee</label>
@@ -216,7 +431,9 @@ export default function AttendanceConsolePage() {
           >
             <option value="">All Departments</option>
             {departments.map((d) => (
-              <option key={d} value={d}>{d}</option>
+              <option key={d} value={d}>
+                {d}
+              </option>
             ))}
           </select>
         </div>
@@ -242,7 +459,9 @@ export default function AttendanceConsolePage() {
                   onChange={(e) => setFilterMonth(Number(e.target.value))}
                 >
                   {MONTHS.map((m, i) => (
-                    <option key={i} value={i + 1}>{m}</option>
+                    <option key={i} value={i + 1}>
+                      {m}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -255,7 +474,9 @@ export default function AttendanceConsolePage() {
                 onChange={(e) => setFilterYear(Number(e.target.value))}
               >
                 {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
-                  <option key={y} value={y}>{y}</option>
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
                 ))}
               </select>
             </div>
@@ -263,17 +484,13 @@ export default function AttendanceConsolePage() {
         )}
         <button
           type="button"
-          onClick={() => viewTab === 'daily' ? load() : handleMonthYearLoad()}
+          onClick={() => (viewTab === 'daily' ? load() : handleMonthYearLoad())}
           className="bg-brand-600 text-white px-4 py-2 rounded text-sm"
         >
           Load
         </button>
-        <Link href="/attendance/mark" className="text-sm text-brand-600 underline ml-2 self-center">
-          Web check-in
-        </Link>
       </div>
 
-      {/* Export Buttons */}
       <div className="flex gap-2 mb-4">
         <button
           type="button"
@@ -300,58 +517,127 @@ export default function AttendanceConsolePage() {
             <tr>
               <th className="px-3 py-2">Code</th>
               <th className="px-3 py-2">Name</th>
-              <th className="px-3 py-2">Department</th>
+              <th className="px-3 py-2">Selfie</th>
+              <th className="px-3 py-2">Location</th>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2">In</th>
               <th className="px-3 py-2">Out</th>
+              <th className="px-3 py-2">OUT source</th>
               <th className="px-3 py-2">Late</th>
               <th className="px-3 py-2">Correct</th>
             </tr>
           </thead>
           <tbody>
-            {filteredRows.map((r) => (
-              <tr key={r.employee.id} className="border-t border-mist">
-                <td className="px-3 py-2">{r.employee.employeeCode}</td>
-                <td className="px-3 py-2">
-                  {r.employee.firstName} {r.employee.lastName}
-                </td>
-                <td className="px-3 py-2 text-ink/60">{r.employee.department ?? '—'}</td>
-                <td className="px-3 py-2">
-                  <span className={`text-xs px-2 py-0.5 rounded ${STATUS_COLORS[r.record?.status ?? 'A'] ?? 'bg-gray-100'}`}>
-                    {r.record?.status ?? 'A'}
-                  </span>
-                </td>
-                <td className="px-3 py-2">
-                  {r.record?.checkInAt ? new Date(r.record.checkInAt).toLocaleTimeString() : '—'}
-                </td>
-                <td className="px-3 py-2">
-                  {r.record?.checkOutAt ? new Date(r.record.checkOutAt).toLocaleTimeString() : '—'}
-                </td>
-                <td className="px-3 py-2">
-                  {r.record?.isLate ? `${r.record.lateMinutes}m` : '—'}
-                </td>
-                <td className="px-3 py-2">
-                  <select
-                    className="text-xs border border-mist rounded px-1 py-1"
-                    defaultValue=""
-                    onChange={(e) => {
-                      if (e.target.value) correct(r.employee.id, e.target.value);
-                      e.target.value = '';
-                    }}
-                  >
-                    <option value="">Set…</option>
-                    {['P', 'A', 'HD', 'L', 'WFH', 'OD', 'WO', 'H', 'ULOB', 'PL'].map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-              </tr>
-            ))}
+            {filteredRows.map((r) => {
+              const selfie =
+                r.record?.checkInSelfieUrl || r.record?.selfieUrl || r.record?.checkOutSelfieUrl;
+              const loc = shortLocation(r.record?.checkInAddress || r.record?.checkOutAddress);
+              return (
+                <tr key={r.employee.id} className="border-t border-mist">
+                  <td className="px-3 py-2">{r.employee.employeeCode}</td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      className="text-brand-600 hover:underline text-left"
+                      onClick={() => openDetail(r.employee.id, date)}
+                    >
+                      {r.employee.firstName} {r.employee.lastName}
+                    </button>
+                    <div className="text-xs">
+                      <Link
+                        href={`/attendance/sheet?employeeId=${r.employee.id}`}
+                        className="text-ink/50 hover:text-brand-600"
+                      >
+                        Sheet
+                      </Link>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    {selfie ? (
+                      <button type="button" onClick={() => setLightbox(selfie)}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={selfie}
+                          alt="Selfie"
+                          className="w-9 h-9 rounded object-cover border border-mist"
+                        />
+                      </button>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-ink/70 max-w-[140px]">
+                    {r.record?.checkInMapsUrl ? (
+                      <a
+                        href={r.record.checkInMapsUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-brand-600 hover:underline"
+                      >
+                        {loc}
+                      </a>
+                    ) : (
+                      loc
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded ${STATUS_COLORS[r.record?.status ?? 'A'] ?? 'bg-gray-100'}`}
+                    >
+                      {r.record?.status ?? 'A'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.record?.checkInAt ? new Date(r.record.checkInAt).toLocaleTimeString() : '—'}
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.record?.checkOutAt ? new Date(r.record.checkOutAt).toLocaleTimeString() : '—'}
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.record?.checkOutLabel ? (
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded ${
+                          r.record.checkOutSource === 'SYSTEM_LOGOUT'
+                            ? 'bg-amber-100 text-amber-900 font-medium'
+                            : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {r.record.checkOutLabel}
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.record?.isLate ? `${r.record.lateMinutes}m` : '—'}
+                  </td>
+                  <td className="px-3 py-2">
+                    {canManage ? (
+                      <select
+                        className="text-xs border border-mist rounded px-1 py-1"
+                        defaultValue=""
+                        onChange={(e) => {
+                          if (e.target.value) correct(r.employee.id, e.target.value);
+                          e.target.value = '';
+                        }}
+                      >
+                        <option value="">Set…</option>
+                        {['P', 'A', 'HD', 'L', 'WFH', 'OD', 'WO', 'H', 'ULOB', 'PL'].map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-xs text-ink/40">View only</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
             {filteredRows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-ink/50">
+                <td colSpan={10} className="px-3 py-6 text-center text-ink/50">
                   {rows.length === 0 ? 'No active employees' : 'No employees match filters'}
                 </td>
               </tr>
@@ -359,6 +645,204 @@ export default function AttendanceConsolePage() {
           </tbody>
         </table>
       </div>
+
+      {detail && (
+        <div className="mb-8 p-4 rounded-lg border border-brand-100 bg-white/90">
+          <div className="flex justify-between items-start gap-2 mb-3">
+            <div>
+              <h2 className="font-display text-xl text-brand-700">
+                {detail.employee.employeeCode} {detail.employee.firstName}{' '}
+                {detail.employee.lastName}
+              </h2>
+              <p className="text-sm text-ink/60">{detail.date}</p>
+            </div>
+            <button
+              type="button"
+              className="text-sm text-ink/50 hover:text-ink"
+              onClick={() => setDetail(null)}
+            >
+              Close
+            </button>
+          </div>
+          {detail.record ? (
+            <>
+              <div className="grid sm:grid-cols-2 gap-3 text-sm mb-4">
+                <div>
+                  <p className="font-medium">Check-in</p>
+                  <p>{detail.formatted?.inTime ?? '—'}</p>
+                  <p className="text-ink/60 text-xs">{detail.formatted?.inLocation}</p>
+                  {detail.record.checkInSelfieUrl && (
+                    <button
+                      type="button"
+                      className="mt-1"
+                      onClick={() => setLightbox(detail.record!.checkInSelfieUrl!)}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={detail.record.checkInSelfieUrl}
+                        alt="Check-in selfie"
+                        className="w-20 h-20 rounded object-cover border"
+                      />
+                    </button>
+                  )}
+                  {inEmbed && (
+                    <iframe
+                      title="Check-in map"
+                      src={inEmbed}
+                      className="mt-2 w-full h-40 rounded border border-mist"
+                      loading="lazy"
+                    />
+                  )}
+                </div>
+                <div>
+                  <p className="font-medium">Check-out</p>
+                  <p>{detail.formatted?.outTime ?? '—'}</p>
+                  {detail.record.checkOutLabel && (
+                    <p
+                      className={`text-xs font-medium mt-0.5 ${
+                        detail.record.checkOutSource === 'SYSTEM_LOGOUT'
+                          ? 'text-amber-800'
+                          : 'text-ink/70'
+                      }`}
+                    >
+                      {detail.record.checkOutLabel}
+                    </p>
+                  )}
+                  {detail.record.checkOutSource !== 'SYSTEM_LOGOUT' && (
+                    <p className="text-ink/60 text-xs">{detail.formatted?.outLocation}</p>
+                  )}
+                  {detail.record.checkOutSource === 'SYSTEM_LOGOUT' && (
+                    <p className="text-xs text-ink/50 mt-1">
+                      Automatic OUT at 10:00 PM — no selfie or GPS.
+                    </p>
+                  )}
+                  {detail.record.checkOutSelfieUrl && (
+                    <button
+                      type="button"
+                      className="mt-1"
+                      onClick={() => setLightbox(detail.record!.checkOutSelfieUrl!)}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={detail.record.checkOutSelfieUrl}
+                        alt="Check-out selfie"
+                        className="w-20 h-20 rounded object-cover border"
+                      />
+                    </button>
+                  )}
+                  {outEmbed && (
+                    <iframe
+                      title="Check-out map"
+                      src={outEmbed}
+                      className="mt-2 w-full h-40 rounded border border-mist"
+                      loading="lazy"
+                    />
+                  )}
+                </div>
+              </div>
+              <p className="text-sm mb-2">
+                Status: {detail.record.status} · Hours: {detail.formatted?.workingHours} · OT:{' '}
+                {detail.formatted?.overtime}
+                {detail.record.todaysEarnings != null
+                  ? ` · Earnings: ₹${detail.record.todaysEarnings.toFixed(2)}`
+                  : ''}
+              </p>
+              {detail.auditLogs.length > 0 && (
+                <div className="text-xs text-ink/60">
+                  <p className="font-medium text-ink/80 mb-1">Audit</p>
+                  <ul className="space-y-0.5">
+                    {detail.auditLogs.map((a) => (
+                      <li key={a.id}>
+                        {a.action} · {new Date(a.createdAt).toLocaleString()}
+                        {a.note ? ` — ${a.note}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-ink/50">No record for this date</p>
+          )}
+          {canManage && (
+            <div className="mt-4 pt-4 border-t border-mist space-y-3">
+              <p className="font-medium text-sm text-brand-700">Mark / edit / correct</p>
+              <p className="text-xs text-ink/50">
+                Changes are written to the audit log. Employees cannot edit these fields.
+              </p>
+              <div className="grid sm:grid-cols-2 gap-3 text-sm">
+                <label className="flex flex-col gap-1">
+                  Status
+                  <select
+                    className="rounded border border-mist px-2 py-1.5"
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value)}
+                  >
+                    {['P', 'A', 'HD', 'L', 'WFH', 'OD', 'WO', 'H', 'ULOB', 'PL'].map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 sm:col-span-2">
+                  Correction note
+                  <input
+                    className="rounded border border-mist px-2 py-1.5"
+                    value={editNote}
+                    onChange={(e) => setEditNote(e.target.value)}
+                    placeholder="Reason for this change"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  Check-in
+                  <input
+                    type="datetime-local"
+                    className="rounded border border-mist px-2 py-1.5"
+                    value={editIn}
+                    onChange={(e) => setEditIn(e.target.value)}
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  Check-out
+                  <input
+                    type="datetime-local"
+                    className="rounded border border-mist px-2 py-1.5"
+                    value={editOut}
+                    onChange={(e) => setEditOut(e.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => manualPunch('IN')}
+                  className="text-sm px-3 py-1.5 rounded bg-brand-600 text-white disabled:opacity-60"
+                >
+                  Mark IN
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => manualPunch('OUT')}
+                  className="text-sm px-3 py-1.5 rounded bg-brand-900 text-white disabled:opacity-60"
+                >
+                  Mark OUT
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={saveCorrection}
+                  className="text-sm px-3 py-1.5 rounded border border-brand-300 hover:bg-brand-50 disabled:opacity-60"
+                >
+                  Save correction
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <h2 className="font-display text-xl text-brand-700 mb-2">Late / ULOB counters</h2>
       <ul className="text-sm bg-white/80 border border-brand-100 rounded-lg divide-y divide-mist">
@@ -377,6 +861,22 @@ export default function AttendanceConsolePage() {
           ))
         )}
       </ul>
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+          role="presentation"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox}
+            alt="Selfie"
+            className="max-w-full max-h-[90vh] rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </main>
   );
 }

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoleCode } from '@prisma/client';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -24,21 +24,27 @@ export class GrowthController {
 
   // Performance
   @Post('performance/goals')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   createGoal(@CurrentUser() user: AuthUser, @Body() dto: CreateGoalDto) {
     return this.growth.createGoal(user, dto);
   }
 
   @Get('performance/goals')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.EMPLOYEE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE)
   listGoals(
     @CurrentUser() user: AuthUser,
     @Query('employeeId') employeeId?: string,
     @Query('cycleYear') cycleYear?: string,
   ) {
     const canSeeAll = user.roles.some((r) =>
-      (['CEO', 'HR', 'MANAGER'] as string[]).includes(r),
+      (['SUPER_ADMIN', 'HR', 'ADMIN'] as string[]).includes(r),
     );
+    if (!canSeeAll && !user.employeeId) {
+      throw new ForbiddenException('No employee profile linked');
+    }
+    if (!canSeeAll && employeeId && employeeId !== user.employeeId) {
+      throw new ForbiddenException('You can only view your own performance goals');
+    }
     return this.growth.listGoals(
       user.companyId,
       canSeeAll ? employeeId : user.employeeId ?? undefined,
@@ -47,19 +53,19 @@ export class GrowthController {
   }
 
   @Post('performance/self-assessment')
-  @Roles(RoleCode.EMPLOYEE, RoleCode.MANAGER, RoleCode.HR)
+  @Roles(RoleCode.EMPLOYEE, RoleCode.ADMIN, RoleCode.HR)
   selfAssessment(@CurrentUser() user: AuthUser, @Body() dto: SelfAssessmentDto) {
     return this.growth.selfAssessment(user, dto);
   }
 
   @Post('performance/manager-review')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   managerReview(@CurrentUser() user: AuthUser, @Body() dto: ManagerReviewDto) {
     return this.growth.managerReview(user, dto);
   }
 
   @Get('performance/:employeeId/summary')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.EMPLOYEE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE)
   summary(
     @CurrentUser() user: AuthUser,
     @Param('employeeId') employeeId: string,
@@ -67,7 +73,7 @@ export class GrowthController {
   ) {
     const id =
       user.employeeId === employeeId ||
-      user.roles.some((r) => (['CEO', 'HR', 'MANAGER'] as string[]).includes(r))
+      user.roles.some((r) => (['SUPER_ADMIN', 'HR', 'ADMIN'] as string[]).includes(r))
         ? employeeId
         : user.employeeId!;
     return this.growth.performanceSummary(
@@ -78,26 +84,26 @@ export class GrowthController {
   }
 
   @Get('me/rewards')
-  @Roles(RoleCode.EMPLOYEE, RoleCode.MANAGER, RoleCode.HR, RoleCode.CEO)
+  @Roles(RoleCode.EMPLOYEE, RoleCode.ADMIN, RoleCode.HR, RoleCode.SUPER_ADMIN)
   myRewards(@CurrentUser() user: AuthUser) {
     return this.growth.myRewards(user);
   }
 
   // Training
   @Get('trainings')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.EMPLOYEE, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE, RoleCode.ADMIN)
   listTrainings(@CurrentUser() user: AuthUser) {
     return this.growth.listTrainings(user.companyId);
   }
 
   @Post('trainings')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   createTraining(@CurrentUser() user: AuthUser, @Body() dto: CreateTrainingDto) {
     return this.growth.createTraining(user, dto);
   }
 
   @Post('trainings/:id/assign')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   assign(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -107,7 +113,7 @@ export class GrowthController {
   }
 
   @Post('trainings/:id/complete')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.EMPLOYEE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.EMPLOYEE, RoleCode.ADMIN)
   complete(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -118,17 +124,17 @@ export class GrowthController {
   }
 
   @Get('me/trainings')
-  @Roles(RoleCode.EMPLOYEE, RoleCode.MANAGER, RoleCode.HR, RoleCode.CEO)
+  @Roles(RoleCode.EMPLOYEE, RoleCode.ADMIN, RoleCode.HR, RoleCode.SUPER_ADMIN)
   myTrainings(@CurrentUser() user: AuthUser) {
     return this.growth.myTrainings(user);
   }
 
   @Get('employees/:id/certifications')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.EMPLOYEE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE)
   certs(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const eid =
       user.employeeId === id ||
-      user.roles.some((r) => (['CEO', 'HR', 'MANAGER'] as string[]).includes(r))
+      user.roles.some((r) => (['SUPER_ADMIN', 'HR', 'ADMIN'] as string[]).includes(r))
         ? id
         : user.employeeId!;
     return this.growth.certifications(user.companyId, eid);
@@ -136,25 +142,25 @@ export class GrowthController {
 
   // Helpdesk
   @Post('tickets')
-  @Roles(RoleCode.EMPLOYEE, RoleCode.MANAGER, RoleCode.HR)
+  @Roles(RoleCode.EMPLOYEE, RoleCode.ADMIN, RoleCode.HR)
   createTicket(@CurrentUser() user: AuthUser, @Body() dto: CreateTicketDto) {
     return this.growth.createTicket(user, dto);
   }
 
   @Get('tickets')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.EMPLOYEE, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE, RoleCode.ADMIN)
   listTickets(@CurrentUser() user: AuthUser, @Query('mine') mine?: string) {
     return this.growth.listTickets(user, mine === '1');
   }
 
   @Get('tickets/:id')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.EMPLOYEE, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE, RoleCode.ADMIN)
   getTicket(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.growth.getTicket(user, id);
   }
 
   @Post('tickets/:id/comment')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.EMPLOYEE, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE, RoleCode.ADMIN)
   comment(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -164,7 +170,7 @@ export class GrowthController {
   }
 
   @Patch('tickets/:id/status')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   status(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -174,13 +180,13 @@ export class GrowthController {
   }
 
   @Post('tickets/:id/escalate')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   escalate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.growth.escalate(user, id);
   }
 
   @Post('tickets/sla/run')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   runSla(@CurrentUser() user: AuthUser) {
     return this.growth.runSlaEscalation(user.companyId);
   }

@@ -1,0 +1,39 @@
+{
+  "key": "real-estate",
+  "name": "Real Estate",
+  "industry": "Real Estate / Property Sales",
+  "description": "Budget- and property-driven qualification for real estate brokers and developers — track buyer budget, preferred location, property type, and site-visit completion through to booking.",
+  "modules": [
+    { "module": "opportunities", "labelSingular": "Booking", "labelPlural": "Bookings" }
+  ],
+  "picklists": [
+    {
+      "key": "budget_range",
+      "label": "Budget Range",
+      "options": [
+        { "value": "<50L" },
+        { "value": "50L-1Cr" },
+        { "value": "1-2Cr" },
+        { "value": "2Cr+" }
+      ]
+    },
+    {
+      "key": "property_type",
+      "label": "Property Type",
+      "options": [
+        { "value": "1BHK" },
+        { "value": "2BHK" },
+        { "value": "3BHK" },
+        { "value": "Villa" },
+        { "value": "Plot" },
+        { "value": "Commercial" }
+      ]
+    }
+  ],
+  "fields": [
+    { "module": "leads", "label": "Budget Range", "type": "picklist", "picklistKey": "budget_range" },
+    { "module": "leads", "label": "Preferred Location", "type": "text" },
+    { "module": "leads", "label": "Property Type", "type": "picklist", "picklistKey": "property_type" },
+    { "module": "leads", "label": "Site Visit Done", "type": "checkbox" }
+  ]
+}

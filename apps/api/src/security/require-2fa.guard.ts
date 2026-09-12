@@ -37,7 +37,7 @@ export class Require2faGuard implements CanActivate {
     }
 
     const roles = user.roles ?? [];
-    const isAdmin = roles.some((r) => ['CEO', 'HR', 'ADMIN'].includes(r));
+    const isAdmin = roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r));
     if (!isAdmin) return true;
 
     const required = await this.security.getSettingBool(

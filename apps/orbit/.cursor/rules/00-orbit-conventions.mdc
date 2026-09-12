@@ -1,0 +1,30 @@
+---
+description: Orbit core conventions and hard rules — apply to every change
+alwaysApply: true
+---
+
+# Orbit conventions (non-negotiable contracts)
+
+Orbit = AI-native business OS for Indian SMBs. Next.js 14 App Router/RSC + Prisma (SQLite dev) + Tailwind. Architecture: PROJECT.md · state of the build: docs/ai/STATE.md · current task board: ROADMAP-V2-TASKS.md.
+
+## The 7 standing contracts (violations get reverted)
+1. **Tenant scoping**: every query `where: { tenantId: (await requireSession()).tenantId }`; verify the row's tenantId before any mutation. Pages are async RSCs with `export const dynamic = "force-dynamic"` — copy `app/(app)/leads/page.tsx`.
+2. **Picklist semantics**: NEVER hardcode statuses/stages/sources or module labels. Read `lib/studio/config.ts`; filter by option *category* via `valuesByCategory(config, key, ...categories)`, validate writes with `isValidOption`, labels via `optionLabel`/`moduleLabel`.
+3. **Mutations = server actions** in `actions.ts` (`"use server"`); after a write: `revalidatePath(...)` then `emit({...})`. `"use server"` files may export ONLY async functions — constants go in a sibling `constants.ts` (runtime-only crash otherwise). Client bits = co-located `"use client"` component with `useTransition` — copy `app/(app)/leads/LeadRowActions.tsx`.
+4. **Money & statutory**: GL postings only via `lib/gl.ts` `postJournal`/auto-post helpers (throws if Dr≠Cr) — never write JournalLines by hand. PF/ESI/GST only via `lib/compliance/*`. Document numbers only via `allocateNumber` (`lib/studio/numbering.ts`) — never `count()+1`.
+5. **New pages**: add to `lib/nav.ts`, guard with `can(session, module, "read"|"write")` (`lib/rbac.ts`) + `components/NoAccess.tsx`. Record pages copy the RecordShell pattern (`components/record/`, exemplar `app/(app)/leads/[id]/page.tsx`). Lists use `FilterBar`/`Pagination` + `parseListParams` (`lib/list.ts`).
+6. **Custom fields**: values through `parseCustom`/`validateCustom` (`lib/studio/validate.ts`). JSON columns are `String @default("{}")` (SQLite has no Json type).
+7. **Two Prisma schemas**: any model change MUST edit `prisma/schema.prisma` AND `prisma/schema.postgres.prisma`, then `npm run db:push`. CI has a schema-sync check.
+
+## Forbidden without explicit human approval
+`lib/auth.ts` · `lib/rbac.ts` · `lib/compliance/*` · deleting/rewriting existing tests · `prisma/dev.db` (lives at prisma/dev.db, not root) · `node_modules/`, `.next/`.
+
+## Verify before claiming done
+`npm test` (vitest, must stay green) · `npx tsc --noEmit` (build ignores TS errors — green build ≠ type-clean; pre-existing errors live only under orbit-frontend/ and orbit-laravel/) · dev server: `npm run dev` → :3000, logins `ceo@demo.orbit` / `sales@demo.orbit`, both `orbit123`. E2e: `npx playwright test` (10 golden-path specs; uses storageState auth — do NOT log in per-test, the login rate-limiter will flake you).
+
+## Misc gotchas
+- AI helpers (`lib/ai.ts`/`lib/copilot.ts`/`lib/ocr.ts`) self-degrade to local heuristics — never wrap in required try/throw; gate live-only UI on `aiEnabled`/`ocrConfigured`.
+- Integrations follow the mock-or-live adapter pattern — `lib/irp.ts` is the template.
+- Money formatting `inr`/`inrLakh`, dates `shortDate` (`lib/format.ts`); UI primitives from `components/ui.tsx` + classes `.card .th .td .btn .input .label .badge`.
+- Windows: stop the dev server before `prisma generate`/`db:push` (DLL lock → EPERM).
+- Before ending a work session that changed code: update `docs/ai/STATE.md`.

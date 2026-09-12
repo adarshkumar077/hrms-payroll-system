@@ -57,7 +57,7 @@ export default function ApprovalsPage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => ['CEO', 'HR', 'MANAGER', 'FINANCE'].includes(r))) {
+    if (!u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN', 'ADMIN'].includes(r))) {
       router.replace('/dashboard');
       return;
     }

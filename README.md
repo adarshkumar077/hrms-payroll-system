@@ -15,44 +15,53 @@ Phases **1–13 complete** (modules **2** and **14** skipped). See `docs/PHASE1.
 
 ## Quick start (Windows / no Docker)
 
+**Minimum daily start (2 terminals):** see [docs/MANUAL-START.md](docs/MANUAL-START.md).
+
 ```powershell
-cd C:\Users\Aadarsh\Projects\eitf-hrms
-npm install
+# Terminal 1 — keep open
 npm run db:up
-# ensure apps/api/.env has DATABASE_URL for port 5433
-npm run db:migrate
-npm run db:seed
-npm run dev:api
-npm run dev:web
+
+# Terminal 2 — API + web + Cloudflare tunnel (keep open)
+npm run start:localhost
 ```
 
 | Service | URL |
 |---|---|
-| Web | http://localhost:3000 |
-| API | http://localhost:3001/api/v1 |
+| Web (local) | http://localhost:3000 |
+| Web (LAN) | http://192.168.1.69:3000 |
+| Web (public) | URL printed by `start:localhost` / `.public-url.txt` |
+| API health | http://localhost:3001/api/v1/health |
 | Swagger | http://localhost:3001/api/docs |
 
-## First-time Super Admin setup
-
-No default login credentials are shipped. After `npm run db:migrate` and `npm run db:seed`:
-
-1. Open http://localhost:3000
-2. Complete the **Initial Super Admin Setup** form (shown when no Super Admin exists), **or** run:
+**First-time setup** (once after clone):
 
 ```powershell
-cd apps\api
-$env:SETUP_SUPER_ADMIN_EMAIL="your-admin@company.com"
-$env:SETUP_SUPER_ADMIN_PASSWORD="YourSecurePassword"
-$env:SETUP_SUPER_ADMIN_MOBILE="9876543210"
-npx tsx prisma/bootstrap-super-admin.ts
+cd C:\Users\Aadarsh\Projects\eitf-hrms
+npm install
+npm run db:up
+# ensure apps/api/.env has DATABASE_URL for embedded Postgres
+npm run db:migrate
+npm run db:seed
 ```
 
-Only an existing Super Admin can create HR accounts (Security → Admin Users or `POST /auth/admin-users`).
+## Login (after seed)
+
+After `npm run db:seed`:
+
+| User | Password |
+|---|---|
+| `superadmin` | `Super@123` |
+| `admin` | `Admin@123` |
+| `hr001` | `HR@123` |
+| `emp001` | `Emp@123` |
+
+If no Super Admin exists yet, open http://localhost:3000 and use **Initial Super Admin Setup**, or run `apps/api` bootstrap with `SETUP_SUPER_ADMIN_*` env vars. Only an existing Super Admin can create HR accounts (Security → Admin Users or `POST /auth/admin-users`).
 
 ## Documentation pack (Phase 13)
 
 | Doc | Path |
 |---|---|
+| Manual start (2 terminals) | `docs/MANUAL-START.md` |
 | User manuals | `docs/USER_MANUALS.md` · Web `/help` |
 | Training | `docs/TRAINING.md` |
 | Deployment | `docs/DEPLOYMENT.md` |

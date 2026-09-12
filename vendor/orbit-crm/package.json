@@ -1,0 +1,56 @@
+{
+  "name": "orbit-business-os",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Orbit — AI-native business operating system for Indian SMBs (CRM + HR + Payroll + Inventory + GST Finance + CEO Cockpit)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium --with-deps",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts",
+    "setup": "prisma generate && prisma db push && tsx prisma/seed.ts",
+    "package": "powershell -ExecutionPolicy Bypass -File scripts/package-deploy.ps1",
+    "db:postgres:generate": "prisma generate --schema prisma/schema.postgres.prisma",
+    "db:postgres:push": "prisma db push --schema prisma/schema.postgres.prisma",
+    "db:postgres:seed": "tsx prisma/seed.ts",
+    "db:migrate:deploy": "prisma migrate deploy --schema prisma/schema.postgres.prisma"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.27.3",
+    "@prisma/client": "^5.18.0",
+    "@types/nodemailer": "^8.0.1",
+    "@types/qrcode": "^1.5.6",
+    "bcryptjs": "^2.4.3",
+    "jose": "^5.6.3",
+    "next": "14.2.5",
+    "nodemailer": "^9.0.3",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.14.11",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.40",
+    "prisma": "^5.18.0",
+    "tailwindcss": "^3.4.7",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.9"
+  }
+}

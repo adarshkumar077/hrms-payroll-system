@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
 import { StorageService } from './storage.service';
+import { assertSafeUpload } from '../common/file-validation.util';
 
 @Injectable()
 export class DocumentsService {
@@ -21,7 +22,7 @@ export class DocumentsService {
   ) {}
 
   private isHrOrCeo(user: AuthUser) {
-    return user.roles.includes(RoleCode.CEO) || user.roles.includes(RoleCode.HR);
+    return user.roles.includes(RoleCode.SUPER_ADMIN) || user.roles.includes(RoleCode.HR);
   }
 
   async listTypes(companyId: string) {
@@ -87,6 +88,7 @@ export class DocumentsService {
   ) {
     if (!this.isHrOrCeo(actor)) throw new ForbiddenException();
     if (!file) throw new BadRequestException('File is required');
+    assertSafeUpload(file);
 
     const emp = await this.prisma.employee.findFirst({
       where: { id: employeeId, companyId: actor.companyId },
@@ -198,6 +200,7 @@ export class DocumentsService {
   ) {
     if (!this.isHrOrCeo(actor)) throw new ForbiddenException();
     if (!file) throw new BadRequestException('File is required');
+    assertSafeUpload(file);
 
     const doc = await this.prisma.employeeDocument.findFirst({
       where: { id: documentId, companyId: actor.companyId, deletedAt: null },

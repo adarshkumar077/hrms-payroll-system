@@ -40,7 +40,7 @@ export default function AuditLogPage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.includes('CEO')) {
+    if (!u.roles.includes('SUPER_ADMIN')) {
       router.replace('/dashboard');
       return;
     }

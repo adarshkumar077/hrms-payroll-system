@@ -1,10 +1,10 @@
-/** Primary Super Admin identities that must never be downgraded, deactivated, or deleted. */
-export const PROTECTED_SUPER_ADMIN_LOGIN_IDS = new Set(['SA001']);
+/** Primary Super Admin identities that must never be downgraded by non-super users. */
+export const PROTECTED_SUPER_ADMIN_LOGIN_IDS = new Set(['SUPERADMIN', 'superadmin']);
 export const PROTECTED_SUPER_ADMIN_EMAILS = new Set(['superadmin@company.com']);
 
 export function isProtectedSuperAdminLoginId(loginId?: string | null): boolean {
   if (!loginId) return false;
-  return PROTECTED_SUPER_ADMIN_LOGIN_IDS.has(loginId.trim().toUpperCase());
+  return PROTECTED_SUPER_ADMIN_LOGIN_IDS.has(loginId.trim().toLowerCase());
 }
 
 export function isProtectedSuperAdminEmail(email?: string | null): boolean {
@@ -12,7 +12,6 @@ export function isProtectedSuperAdminEmail(email?: string | null): boolean {
   return PROTECTED_SUPER_ADMIN_EMAILS.has(email.trim().toLowerCase());
 }
 
-/** True when this user is the primary Super Admin (by User ID or email). */
 export function isProtectedSuperAdmin(user: {
   loginId?: string | null;
   email?: string | null;
@@ -23,4 +22,4 @@ export function isProtectedSuperAdmin(user: {
 }
 
 export const PROTECTED_SUPER_ADMIN_MSG =
-  'The primary Super Admin account is protected and cannot be modified, deactivated, or removed.';
+  'The primary Super Admin account is protected and cannot be modified by others.';

@@ -109,7 +109,7 @@ export class DashboardService {
 
   async ceoDashboard(companyId: string, forceRefresh = false) {
     const cached = await this.prisma.dashboardMetricsCache.findUnique({
-      where: { companyId_scope: { companyId, scope: 'ceo' } },
+      where: { companyId_scope: { companyId, scope: 'SUPER_ADMIN' } },
     });
     if (
       !forceRefresh &&
@@ -253,10 +253,10 @@ export class DashboardService {
     };
 
     await this.prisma.dashboardMetricsCache.upsert({
-      where: { companyId_scope: { companyId, scope: 'ceo' } },
+      where: { companyId_scope: { companyId, scope: 'SUPER_ADMIN' } },
       create: {
         companyId,
-        scope: 'ceo',
+        scope: 'SUPER_ADMIN',
         metricsJson: metrics as unknown as Prisma.InputJsonValue,
         computedAt: new Date(),
       },
@@ -277,7 +277,7 @@ export class DashboardService {
       },
     });
     const enabled = setting?.value === true || setting?.value === 'true';
-    const isHr = user.roles.some((r) => (['CEO', 'HR'] as string[]).includes(r));
+    const isHr = user.roles.some((r) => (['SUPER_ADMIN', 'HR'] as string[]).includes(r));
     if (!enabled && !isHr) {
       return { allowed: false, message: 'Employee dashboard override disabled' };
     }

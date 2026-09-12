@@ -49,7 +49,7 @@ export class PayrollService {
   ) {}
 
   private isFinance(user: AuthUser) {
-    const roles: string[] = [RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE];
+    const roles: string[] = [RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN];
     return user.roles.some((r) => roles.includes(r));
   }
 
@@ -213,7 +213,7 @@ export class PayrollService {
   }
 
   async getStructure(user: AuthUser, employeeId: string) {
-    const privileged: RoleCode[] = [RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.MANAGER];
+    const privileged: RoleCode[] = [RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN];
     const isPrivileged = user.roles.some((r) => privileged.includes(r as RoleCode));
     if (!isPrivileged && user.employeeId !== employeeId) {
       throw new ForbiddenException('You can only view your own salary structure');
@@ -945,7 +945,7 @@ export class PayrollService {
   }
 
   async reviewReimbursement(user: AuthUser, id: string, dto: ReviewReimbursementDto) {
-    const isCeo = user.roles.includes(RoleCode.CEO);
+    const isCeo = user.roles.includes(RoleCode.SUPER_ADMIN);
     const isHr = user.roles.includes(RoleCode.HR) || isCeo;
     if (!isHr && !isCeo) throw new ForbiddenException();
 

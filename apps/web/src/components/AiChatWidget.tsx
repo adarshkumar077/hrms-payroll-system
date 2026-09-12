@@ -21,7 +21,7 @@ type ChatMessage = {
 };
 
 type TicketForm = {
-  category: 'HR' | 'IT' | 'FINANCE' | 'ADMIN';
+  category: 'HR' | 'IT' | 'ADMIN' | 'ADMIN';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   subject: string;
   description: string;
@@ -315,7 +315,10 @@ export function AiChatWidget() {
       {open && (
         <div className="mb-3 w-[min(100vw-2rem,24rem)] h-[min(85vh,32rem)] flex flex-col rounded-2xl border border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-900 shadow-elevated overflow-hidden animate-slide-in">
           <div className="px-4 py-3 gradient-brand text-white text-sm font-semibold flex items-center gap-2 shrink-0">
-            <span className="flex-1">HR Assistant</span>
+            <span className="flex-1">EITF AI Assistant</span>
+            <Link href="/assistant" className="opacity-90 hover:opacity-100 text-xs px-2 py-1 rounded-lg bg-white/15">
+              Full page
+            </Link>
             {screen !== 'home' && (
               <button type="button" onClick={goBack} className="opacity-90 hover:opacity-100 text-xs px-2 py-1 rounded-lg bg-white/15" title="Back">
                 ← Back
@@ -425,7 +428,7 @@ export function AiChatWidget() {
                       >
                         <option value="HR">HR</option>
                         <option value="IT">IT</option>
-                        <option value="FINANCE">Finance</option>
+                        <option value="ADMIN">Admin</option>
                         <option value="ADMIN">Admin</option>
                       </select>
                     </label>
@@ -590,7 +593,7 @@ export function AiChatWidget() {
         className="rounded-2xl gradient-brand text-white px-5 py-3.5 text-sm font-medium shadow-elevated hover:shadow-glow transition-all duration-200 flex items-center gap-2"
       >
         <span aria-hidden>💬</span>
-        {open ? 'Close' : 'HR Assistant'}
+        {open ? 'Close' : 'EITF AI Assistant'}
       </button>
     </div>
   );

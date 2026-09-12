@@ -70,7 +70,7 @@ export default function ReportsPage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => ['CEO', 'HR', 'FINANCE', 'MANAGER'].includes(r))) {
+    if (!u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN', 'ADMIN'].includes(r))) {
       router.replace('/dashboard');
     }
   }, [router]);

@@ -16,7 +16,7 @@ export default function WorkflowsPage() {
   const [message, setMessage] = useState('');
   const [editType, setEditType] = useState('LEAVE');
   const [stepsJson, setStepsJson] = useState(
-    '[{"stepOrder":1,"approverRole":"MANAGER","label":"Manager"},{"stepOrder":2,"approverRole":"HR","label":"HR"}]',
+    '[{"stepOrder":1,"approverRole":"ADMIN","label":"Admin"},{"stepOrder":2,"approverRole":"HR","label":"HR"}]',
   );
 
   function load() {
@@ -31,7 +31,7 @@ export default function WorkflowsPage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => ['CEO', 'HR'].includes(r))) {
+    if (!u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r))) {
       router.replace('/dashboard');
       return;
     }

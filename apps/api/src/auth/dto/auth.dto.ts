@@ -71,6 +71,13 @@ export class RefreshTokenDto {
   refreshToken!: string;
 }
 
+export class LogoutDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  refreshToken?: string;
+}
+
 export class Setup2faDto {
   @ApiProperty()
   @IsString()

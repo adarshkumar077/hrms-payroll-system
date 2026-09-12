@@ -1,0 +1,19 @@
+{
+  "name": "orbit-tally-connector",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone CLI that syncs Orbit ledgers/invoices with a local Tally Prime / Tally.ERP 9 instance over its HTTP XML interface. No dependency on the Orbit app codebase.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "tsx index.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4"
+  },
+  "notes": "No install step needed inside connector/ when run from the Orbit monorepo checkout — `npx tsx` picks up the root's node_modules/.bin/tsx. For a fully standalone deployment (this folder copied elsewhere), run `npm install` here first."
+}

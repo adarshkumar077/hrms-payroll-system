@@ -32,26 +32,26 @@ const DEFAULTS: {
     type: WorkflowType.LEAVE,
     name: 'Leave approval',
     steps: [
-      { stepOrder: 1, approverRole: 'MANAGER', label: 'Manager' },
+      { stepOrder: 1, approverRole: 'ADMIN', label: 'ADMIN' },
       { stepOrder: 2, approverRole: 'HR', label: 'HR' },
     ],
   },
   {
     type: WorkflowType.LOAN,
     name: 'Loan approval',
-    steps: [{ stepOrder: 1, approverRole: 'FINANCE', label: 'Finance' }],
+    steps: [{ stepOrder: 1, approverRole: 'ADMIN', label: 'ADMIN' }],
   },
   {
     type: WorkflowType.ADVANCE,
     name: 'Advance approval',
-    steps: [{ stepOrder: 1, approverRole: 'FINANCE', label: 'Finance' }],
+    steps: [{ stepOrder: 1, approverRole: 'ADMIN', label: 'ADMIN' }],
   },
   {
     type: WorkflowType.EXPENSE,
     name: 'Reimbursement approval',
     steps: [
       { stepOrder: 1, approverRole: 'HR', label: 'HR' },
-      { stepOrder: 2, approverRole: 'CEO', label: 'Super Admin' },
+      { stepOrder: 2, approverRole: 'SUPER_ADMIN', label: 'Super Admin' },
     ],
   },
   {
@@ -64,7 +64,7 @@ const DEFAULTS: {
     name: 'Salary revision approval',
     steps: [
       { stepOrder: 1, approverRole: 'HR', label: 'HR' },
-      { stepOrder: 2, approverRole: 'CEO', label: 'Super Admin' },
+      { stepOrder: 2, approverRole: 'SUPER_ADMIN', label: 'Super Admin' },
     ],
   },
 ];
@@ -72,9 +72,9 @@ const DEFAULTS: {
 const CLEARANCE_STEPS = [
   { code: 'HR', title: 'HR clearance', department: 'HR' },
   { code: 'IT', title: 'IT / assets returned', department: 'IT' },
-  { code: 'FINANCE', title: 'Finance / loans & ESD', department: 'Finance' },
+  { code: 'ADMIN', title: 'Finance / loans & ESD', department: 'ADMIN' },
   { code: 'ADMIN', title: 'Admin / access cards', department: 'Admin' },
-  { code: 'MANAGER', title: 'Manager handover', department: 'Manager' },
+  { code: 'ADMIN', title: 'Manager handover', department: 'ADMIN' },
 ];
 
 @Injectable()
@@ -122,7 +122,7 @@ export class WorkflowService {
   }
 
   async configure(user: AuthUser, type: WorkflowType, dto: ConfigureWorkflowDto) {
-    if (!user.roles.some((r) => (['CEO', 'HR'] as string[]).includes(r))) {
+    if (!user.roles.some((r) => (['SUPER_ADMIN', 'HR'] as string[]).includes(r))) {
       throw new ForbiddenException();
     }
     await this.ensureDefaults(user.companyId);
@@ -234,7 +234,7 @@ export class WorkflowService {
     const role = requiredRole.toUpperCase();
     if (user.roles.includes(role)) return true;
     // CEO can act as HR/FINANCE/MANAGER for governance override
-    if (user.roles.includes('CEO')) return true;
+    if (user.roles.includes('SUPER_ADMIN')) return true;
     return false;
   }
 

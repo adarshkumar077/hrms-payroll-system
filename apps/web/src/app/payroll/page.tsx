@@ -42,7 +42,7 @@ export default function PayrollPage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => ['CEO', 'HR', 'FINANCE'].includes(r))) {
+    if (!u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r))) {
       router.replace('/dashboard');
       return;
     }

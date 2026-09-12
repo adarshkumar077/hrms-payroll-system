@@ -1,0 +1,17 @@
+[Unit]
+Description=EITF HRMS Docker Compose Stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/eitf-hrms
+EnvironmentFile=/opt/eitf-hrms/.env.production
+ExecStart=/usr/bin/docker compose --env-file .env.production --profile tunnel up -d --build
+ExecStop=/usr/bin/docker compose --env-file .env.production down
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

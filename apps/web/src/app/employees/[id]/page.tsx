@@ -188,7 +188,7 @@ export default function EmployeeDetailPage() {
       router.replace('/');
       return;
     }
-    setIsAdmin(u.roles.includes('CEO') || u.roles.includes('HR'));
+    setIsAdmin(u.roles.includes('SUPER_ADMIN') || u.roles.includes('HR') || u.roles.includes('ADMIN'));
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, router]);
@@ -290,7 +290,11 @@ export default function EmployeeDetailPage() {
 
   async function generateCredentials() {
     if (!isAdmin || !emp) return;
-    if (resetPassword && resetPassword !== confirmResetPassword) {
+    if (!resetPassword) {
+      setError('Enter a new password — auto-generate is disabled for security.');
+      return;
+    }
+    if (resetPassword !== confirmResetPassword) {
       setError('Passwords do not match.');
       return;
     }
@@ -298,15 +302,11 @@ export default function EmployeeDetailPage() {
     setError('');
     setMessage('');
     try {
-      const res = await api<{ username: string; password: string; employeeCode: string }>(
+      const res = await api<{ username: string; message: string; employeeCode: string }>(
         `/employees/${id}/credentials/reset`,
         {
           method: 'POST',
-          body: JSON.stringify(
-            resetPassword
-              ? { password: resetPassword }
-              : { generatePassword: true },
-          ),
+          body: JSON.stringify({ password: resetPassword }),
         },
       );
       setResetPassword('');
@@ -314,7 +314,7 @@ export default function EmployeeDetailPage() {
       setShowResetPassword(false);
       await loadLoginInfo();
       setMessage(
-        `Password reset — Username: ${res.username} · Password: ${res.password} (share securely)`,
+        `Password reset for ${res.username}. Share the password you set through a secure channel (never email or chat).`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Credential reset failed');

@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Param, Patch, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { assertEmployeeScope } from '../common/authorization.util';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { RoleCode } from '@prisma/client';
@@ -26,32 +37,26 @@ export class LifecycleController {
   constructor(private readonly lifecycle: LifecycleService) {}
 
   @Post('onboarding/start')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   start(@CurrentUser() user: AuthUser, @Body() dto: StartOnboardingDto) {
     return this.lifecycle.startOnboarding(user.companyId, dto.employeeId, user.id);
   }
 
   @Get('onboarding')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   list(@CurrentUser() user: AuthUser) {
     return this.lifecycle.listOnboarding(user.companyId);
   }
 
   @Get('onboarding/:employeeId')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.EMPLOYEE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE)
   getOne(@CurrentUser() user: AuthUser, @Param('employeeId') employeeId: string) {
-    if (
-      user.employeeId &&
-      user.employeeId !== employeeId &&
-      !user.roles.some((r) => (['CEO', 'HR'] as string[]).includes(r))
-    ) {
-      return this.lifecycle.getOnboarding(user.companyId, user.employeeId);
-    }
+    assertEmployeeScope(user, employeeId, 'You can only view your own onboarding record');
     return this.lifecycle.getOnboarding(user.companyId, employeeId);
   }
 
   @Patch('onboarding/:id/task/:taskId')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   updateTask(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -62,19 +67,19 @@ export class LifecycleController {
   }
 
   @Get('assets')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   listAssets(@CurrentUser() user: AuthUser) {
     return this.lifecycle.listAssets(user.companyId);
   }
 
   @Post('assets')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   createAsset(@CurrentUser() user: AuthUser, @Body() dto: CreateAssetDto) {
     return this.lifecycle.createAsset(user, dto);
   }
 
   @Post('assets/:id/allocate')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   allocate(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -84,7 +89,7 @@ export class LifecycleController {
   }
 
   @Post('assets/:id/return')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   returnAsset(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -94,7 +99,7 @@ export class LifecycleController {
   }
 
   @Post('assets/:id/damage-charge')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   damage(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -104,31 +109,31 @@ export class LifecycleController {
   }
 
   @Get('me/assets')
-  @Roles(RoleCode.EMPLOYEE, RoleCode.MANAGER, RoleCode.HR, RoleCode.CEO)
+  @Roles(RoleCode.EMPLOYEE, RoleCode.ADMIN, RoleCode.HR, RoleCode.SUPER_ADMIN)
   myAssets(@CurrentUser() user: AuthUser) {
     return this.lifecycle.myAssets(user);
   }
 
   @Post('exit/resign')
-  @Roles(RoleCode.EMPLOYEE, RoleCode.MANAGER, RoleCode.HR)
+  @Roles(RoleCode.EMPLOYEE, RoleCode.ADMIN, RoleCode.HR)
   resign(@CurrentUser() user: AuthUser, @Body() dto: ResignDto) {
     return this.lifecycle.resign(user, dto);
   }
 
   @Get('exit')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   listExit(@CurrentUser() user: AuthUser) {
     return this.lifecycle.listResignations(user.companyId);
   }
 
   @Get('exit/:id')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.EMPLOYEE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE, RoleCode.ADMIN)
   getExit(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.lifecycle.getResignation(user.companyId, id);
   }
 
   @Post('exit/:id/review')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   reviewExit(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -138,7 +143,7 @@ export class LifecycleController {
   }
 
   @Post('exit/:id/clearance/:step')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   clearance(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -149,7 +154,7 @@ export class LifecycleController {
   }
 
   @Post('exit/:id/exit-interview')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.EMPLOYEE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.EMPLOYEE, RoleCode.ADMIN)
   interview(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -159,7 +164,7 @@ export class LifecycleController {
   }
 
   @Post('exit/:id/documents')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -187,32 +192,32 @@ export class LifecycleController {
   }
 
   @Post('exit/:id/fnf/generate')
-  @Roles(RoleCode.CEO, RoleCode.FINANCE, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.ADMIN, RoleCode.HR)
   generateFnf(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.lifecycle.generateFnf(user, id);
   }
 
   @Post('exit/:id/fnf/finalize')
-  @Roles(RoleCode.CEO, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.ADMIN)
   finalizeFnf(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.lifecycle.finalizeFnf(user, id);
   }
 
   @Get('exit/:id/fnf')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.EMPLOYEE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE)
   async getFnf(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const r = await this.lifecycle.getResignation(user.companyId, id);
     return r.fnf;
   }
 
   @Get('exit/:id/experience-letter')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.EMPLOYEE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE)
   experience(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.lifecycle.letter(user, id, 'experience');
   }
 
   @Get('exit/:id/relieving-letter')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.EMPLOYEE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE)
   relieving(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.lifecycle.letter(user, id, 'relieving');
   }

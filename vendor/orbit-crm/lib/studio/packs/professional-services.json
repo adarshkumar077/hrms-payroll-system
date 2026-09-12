@@ -1,0 +1,28 @@
+{
+  "key": "professional-services",
+  "name": "Professional Services",
+  "industry": "CA / Tax / Compliance & Advisory Firms",
+  "description": "Engagement-based pipeline for CA, tax, and compliance firms — service type and financial year on the lead, statutory identifiers on the account.",
+  "modules": [
+    { "module": "opportunities", "labelSingular": "Engagement", "labelPlural": "Engagements" }
+  ],
+  "picklists": [
+    {
+      "key": "service_type",
+      "label": "Service Type",
+      "options": [
+        { "value": "GST Filing" },
+        { "value": "Audit" },
+        { "value": "Company Registration" },
+        { "value": "Advisory" },
+        { "value": "Bookkeeping" }
+      ]
+    }
+  ],
+  "fields": [
+    { "module": "leads", "label": "Service Required", "type": "picklist", "picklistKey": "service_type" },
+    { "module": "leads", "label": "Financial Year", "type": "text" },
+    { "module": "accounts", "label": "PAN Number", "type": "text" },
+    { "module": "accounts", "label": "CIN", "type": "text" }
+  ]
+}

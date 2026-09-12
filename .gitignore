@@ -22,3 +22,15 @@ apps/mobile/ios/
 !apps/api/prisma/migrations/
 uploads/
 data/
+.public-url.txt
+.cloudflared-tunnel.log
+# Vendor embeds full Orbit CRM (node_modules kept on disk; omit from git if too large)
+vendor/orbit-crm/node_modules/
+vendor/orbit-crm/.next/
+vendor/orbit-crm/prisma/*.db
+vendor/orbit-crm/prisma/*.db-journal
+apps/orbit/node_modules/
+apps/orbit/.next/
+apps/orbit/prisma/*.db
+apps/orbit/prisma/*.db-journal
+apps/orbit/.env

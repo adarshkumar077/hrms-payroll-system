@@ -52,9 +52,9 @@ const ONBOARDING_TASKS = [
 const CLEARANCE_STEPS = [
   { code: 'HR', title: 'HR clearance', department: 'HR' },
   { code: 'IT', title: 'IT / assets returned', department: 'IT' },
-  { code: 'FINANCE', title: 'Finance / loans & ESD', department: 'Finance' },
+  { code: 'ADMIN', title: 'Finance / loans & ESD', department: 'ADMIN' },
   { code: 'ADMIN', title: 'Admin / access cards', department: 'Admin' },
-  { code: 'MANAGER', title: 'Manager handover', department: 'Manager' },
+  { code: 'ADMIN', title: 'Manager handover', department: 'ADMIN' },
 ];
 
 @Injectable()
@@ -68,12 +68,12 @@ export class LifecycleService {
   ) {}
 
   private isHr(user: AuthUser) {
-    return user.roles.some((r) => ([RoleCode.CEO, RoleCode.HR] as string[]).includes(r));
+    return user.roles.some((r) => ([RoleCode.SUPER_ADMIN, RoleCode.HR] as string[]).includes(r));
   }
 
   private isFinance(user: AuthUser) {
     return user.roles.some((r) =>
-      ([RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE] as string[]).includes(r),
+      ([RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN] as string[]).includes(r),
     );
   }
 

@@ -1,0 +1,1052 @@
+// Orbit — AI-native Business OS for Indian SMBs
+// Modular monolith. Every business table carries tenantId for multi-tenant isolation.
+// SQLite for dev (zero-config); swap `provider = "postgresql"` for prod.
+
+generator client {
+  provider = "prisma-client-js"
+  // "native" = the dev machine (Windows). The rest are Linux shared-hosting flavours
+  // (Debian/Ubuntu + RHEL/CloudLinux, OpenSSL 1.1.x & 3.0.x) so the query engine is
+  // present after upload. Re-run `prisma generate` on the host if it still mismatches.
+  binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x", "rhel-openssl-1.1.x", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// PLATFORM CORE
+// ─────────────────────────────────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  gstin     String? // company GSTIN
+  aato      Float    @default(0) // annual aggregate turnover (₹) — drives e-invoice/HSN rules
+  currency  String   @default("INR")
+  plan      String   @default("free") // free, growth, scale
+  seats     Int      @default(5)
+  isActive  Boolean  @default(true)
+  configVersion Int  @default(0) // bumped on every Studio config write — cache invalidation stamp
+  createdAt DateTime @default(now())
+
+  users         User[]
+  roles         Role[]
+  accounts      Account[]
+  contacts      Contact[]
+  leads         Lead[]
+  opportunities Opportunity[]
+  products      Product[]
+  quotations    Quotation[]
+  tickets       Ticket[]
+  activities    Activity[]
+  events        EventLog[]
+  employees     Employee[]
+  leaves        LeaveApplication[]
+  attendances   Attendance[]
+  salaryStructures SalaryStructure[]
+  payrollRuns   PayrollRun[]
+  warehouses    Warehouse[]
+  items         Item[]
+  stockMoves    StockMove[]
+  purchaseOrders PurchaseOrder[]
+  invoices      Invoice[]
+}
+
+model Role {
+  id          String  @id @default(cuid())
+  tenantId    String
+  tenant      Tenant  @relation(fields: [tenantId], references: [id])
+  name        String
+  // JSON: { "leads": ["read","write"], "payroll": ["read"], "_fields": {"opportunity.amount":"hidden"} }
+  permissions String  @default("{}")
+  users       User[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  name         String
+  email        String   @unique
+  passwordHash String
+  roleId       String?
+  role         Role?    @relation(fields: [roleId], references: [id])
+  isCeo        Boolean  @default(false)
+  active       Boolean  @default(true)
+  hourlyCost   Float    @default(0) // employee-cost / effort costing
+  emailVerified Boolean @default(false)
+  resetToken    String?
+  resetTokenExp DateTime?
+  inviteToken   String?
+  mustReset     Boolean @default(false)
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String?
+  recoveryCodes    String? // JSON array of unused recovery codes
+  createdAt    DateTime @default(now())
+
+  ownedLeads         Lead[]         @relation("LeadOwner")
+  ownedOpportunities Opportunity[]  @relation("OppOwner")
+  assignedTickets    Ticket[]       @relation("TicketOwner")
+  activities         Activity[]
+  employee           Employee?
+}
+
+// Append-only event bus. Every module write emits an event the cockpit + automations read.
+model EventLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  type      String // e.g. "lead.created", "invoice.finalized", "payroll.run.locked"
+  entity    String // "Lead", "Invoice"
+  entityId  String
+  payload   String   @default("{}") // JSON
+  actorId   String?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, type])
+  @@index([tenantId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// CRM / SALES
+// ─────────────────────────────────────────────────────────────
+
+model Account {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  name      String
+  industry  String?
+  phone     String?
+  email     String?
+  gstin     String?
+  address   String?
+  city      String?
+  state     String?
+  custom    String   @default("{}") // Studio custom-field values, JSON keyed by c_* field codes
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  updatedById String?
+
+  contacts      Contact[]
+  opportunities Opportunity[]
+  tickets       Ticket[]
+  invoices      Invoice[]
+  quotations    Quotation[]
+  contracts         Contract[]
+  installedProducts InstalledProduct[]
+
+  @@index([tenantId])
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  accountId String?
+  account   Account? @relation(fields: [accountId], references: [id])
+  name      String
+  email     String?
+  phone     String?
+  title     String?
+  custom    String   @default("{}") // Studio custom-field values (JSON)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  updatedById String?
+
+  @@index([tenantId])
+}
+
+model Lead {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  name      String
+  company   String?
+  email     String?
+  phone     String?
+  source    String   @default("Manual") // JustDial, IndiaMART, TradeIndia, Website, WhatsApp, Manual
+  status    String   @default("New") // New, Contacted, Qualified, Converted, Dead
+  score     Int? // AI lead score 0-100
+  scoreReason String?
+  ownerId   String?
+  owner     User?    @relation("LeadOwner", fields: [ownerId], references: [id])
+  custom    String   @default("{}") // Studio custom-field values (JSON)
+  // Conversion linkage (set by the Studio convert action; re-convert is blocked)
+  convertedAccountId     String?
+  convertedContactId     String?
+  convertedOpportunityId String?
+  convertedAt            DateTime?
+  // Wave A: work-the-day follow-up + lost-reason fields
+  followUpAt   DateTime?
+  followUpType String?
+  lostReason   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  updatedById String?
+
+  @@index([tenantId, status])
+}
+
+model Opportunity {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  accountId String?
+  account   Account? @relation(fields: [accountId], references: [id])
+  name      String
+  amount    Float    @default(0)
+  stage     String   @default("Qualification") // Qualification, Proposal, Negotiation, ClosedWon, ClosedLost
+  probability Int    @default(20)
+  closeDate DateTime?
+  ownerId   String?
+  owner     User?    @relation("OppOwner", fields: [ownerId], references: [id])
+  custom    String   @default("{}") // Studio custom-field values (JSON)
+  // Wave A: work-the-day follow-up + lost-reason fields
+  followUpAt   DateTime?
+  followUpType String?
+  lostReason   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  updatedById String?
+
+  quotations Quotation[]
+
+  @@index([tenantId, stage])
+}
+
+model Product {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  name      String
+  sku       String?
+  hsn       String? // HSN code — shared with Inventory + Finance
+  unitPrice Float    @default(0)
+  taxRate   Float    @default(18) // GST %
+  custom    String   @default("{}") // Studio custom-field values (JSON)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  updatedById String?
+
+  quotationLines QuotationLine[]
+  item           Item?
+  installedProducts InstalledProduct[]
+
+  @@index([tenantId])
+}
+
+model Quotation {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  number        String
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  accountId     String?
+  account       Account? @relation(fields: [accountId], references: [id])
+  contactId     String? // scalar only, polymorphic-lite (no Contact back-relation yet — see Contact model)
+  status        String   @default("Draft") // Draft, Sent, Accepted, Rejected (legacy) — see quotation_stage picklist for the 7-stage lifecycle
+  subtotal      Float    @default(0)
+  taxTotal      Float    @default(0)
+  discount      Float    @default(0)
+  grandTotal    Float    @default(0)
+  // Wave B: quotation builder depth
+  validUntil       DateTime?
+  revisionNo       Int      @default(0)
+  charges          Float    @default(0)
+  chargesLabel     String?
+  chargesTaxRate   Float    @default(0)
+  adjustment       Float    @default(0)
+  termsText        String?
+  paymentTermsText String?
+  billingAddress   String?
+  shippingAddress  String?
+  custom           String   @default("{}") // Studio custom-field values (JSON)
+  convertedInvoiceId String? // set when converted to an invoice (Wave B "Convert to Invoice")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
+  updatedById   String?
+
+  lines QuotationLine[]
+
+  @@index([tenantId, status])
+}
+
+model QuotationLine {
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  productId   String?
+  product     Product?  @relation(fields: [productId], references: [id])
+  description String
+  qty         Float     @default(1)
+  unitPrice   Float     @default(0)
+  taxRate     Float     @default(18)
+  lineTotal   Float     @default(0)
+  // Wave B: quotation builder depth
+  discountPct Float     @default(0)
+  uom         String?
+  optional    Boolean   @default(false)
+  sortOrder   Int       @default(0)
+}
+
+model Ticket {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  accountId  String?
+  account    Account? @relation(fields: [accountId], references: [id])
+  subject    String
+  priority   String   @default("Medium") // Low, Medium, High, Urgent
+  status     String   @default("Open") // Open, InProgress, Resolved, Closed
+  slaDueAt   DateTime?
+  ownerId    String?
+  owner      User?    @relation("TicketOwner", fields: [ownerId], references: [id])
+  custom     String   @default("{}") // Studio custom-field values (JSON)
+  // Wave C: service/AMC depth — contract + installed-product links are scalar-only,
+  // polymorphic-lite (no Prisma relation), same pattern as Quotation.contactId.
+  typeKey    String? // value from ticket_type picklist
+  contractId String?
+  installedProductId String?
+  charges    Float    @default(0)
+  feedback   String?
+  feedbackRating Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+  updatedById String?
+
+  @@index([tenantId, status])
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  type      String   @default("Task") // Task, Call, Meeting, Note
+  subject   String
+  relatedTo String? // "Lead:<id>" | "Opportunity:<id>" etc.
+  dueDate   DateTime?
+  done      Boolean  @default(false)
+  summary   String? // AI call summary lands here
+  ownerId   String?
+  owner     User?    @relation(fields: [ownerId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// HR
+// ─────────────────────────────────────────────────────────────
+
+model Employee {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  userId       String?  @unique
+  user         User?    @relation(fields: [userId], references: [id])
+  code         String
+  name         String
+  email        String?
+  department   String?
+  designation  String?
+  managerId    String?
+  dateOfJoining DateTime @default(now())
+  ctc          Float    @default(0) // annual CTC ₹
+  active       Boolean  @default(true)
+
+  leaves           LeaveApplication[]
+  attendances      Attendance[]
+  salaryStructure  SalaryStructure?
+  payslips         Payslip[]
+
+  @@index([tenantId])
+}
+
+model LeaveApplication {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  type       String   @default("Casual") // Casual, Sick, Earned, Unpaid
+  fromDate   DateTime
+  toDate     DateTime
+  days       Float    @default(1)
+  status     String   @default("Pending") // Pending, Approved, Rejected
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, status])
+}
+
+model Attendance {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  date       DateTime
+  checkIn    DateTime?
+  checkOut   DateTime?
+  status     String   @default("Present") // Present, Absent, HalfDay, WeekOff, Leave
+  // Geofencing
+  checkInLat Float?
+  checkInLng Float?
+  distanceM  Float? // distance from registered client address (m)
+
+  @@index([tenantId, employeeId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// PAYROLL (India statutory)
+// ─────────────────────────────────────────────────────────────
+
+model SalaryStructure {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  employeeId  String   @unique
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  gross       Float    @default(0) // monthly gross ₹
+  basic       Float    @default(0) // must be >= 50% of gross (2025 Labour Codes)
+  hra         Float    @default(0)
+  allowances  Float    @default(0)
+  compliant   Boolean  @default(true) // basic >= 50% gross check
+}
+
+model PayrollRun {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  month     Int
+  year      Int
+  status    String   @default("Draft") // Draft, Locked, Paid
+  grossTotal Float   @default(0)
+  netTotal  Float    @default(0)
+  pfTotal   Float    @default(0)
+  esiTotal  Float    @default(0)
+  tdsTotal  Float    @default(0)
+  createdAt DateTime @default(now())
+
+  payslips Payslip[]
+
+  @@index([tenantId, year, month])
+}
+
+model Payslip {
+  id           String     @id @default(cuid())
+  payrollRunId String
+  payrollRun   PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employeeId   String
+  employee     Employee   @relation(fields: [employeeId], references: [id])
+  gross        Float      @default(0)
+  basic        Float      @default(0)
+  pfEmployee   Float      @default(0) // 12% of basic (capped 15k)
+  pfEmployer   Float      @default(0)
+  esiEmployee  Float      @default(0) // 0.75% if wage <= 21k
+  esiEmployer  Float      @default(0) // 3.25%
+  pt           Float      @default(0) // professional tax (state slab)
+  tds          Float      @default(0)
+  lossOfPay    Float      @default(0)
+  netPay       Float      @default(0)
+}
+
+// ─────────────────────────────────────────────────────────────
+// INVENTORY / ORDERS
+// ─────────────────────────────────────────────────────────────
+
+model Warehouse {
+  id       String  @id @default(cuid())
+  tenantId String
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+  name     String
+  location String?
+
+  stockMoves StockMove[]
+}
+
+model Item {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  productId  String?  @unique
+  product    Product? @relation(fields: [productId], references: [id])
+  name       String
+  sku        String?
+  hsn        String?
+  uom        String   @default("Nos")
+  onHand     Float    @default(0)
+  reorderLevel Float  @default(0)
+  costPrice  Float    @default(0)
+
+  stockMoves StockMove[]
+
+  @@index([tenantId])
+}
+
+model StockMove {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  itemId      String
+  item        Item      @relation(fields: [itemId], references: [id])
+  warehouseId String?
+  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id])
+  qty         Float // +in / -out
+  type        String    @default("Adjustment") // GRN, Sale, Adjustment, Transfer
+  ref         String?
+  createdAt   DateTime  @default(now())
+
+  @@index([tenantId, itemId])
+}
+
+model PurchaseOrder {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  number    String
+  vendor    String
+  status    String   @default("Draft") // Draft, Sent, Received
+  total     Float    @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// FINANCE (GST-native)
+// ─────────────────────────────────────────────────────────────
+
+model Invoice {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  accountId  String?
+  account    Account? @relation(fields: [accountId], references: [id])
+  number     String
+  invoiceType String  @default("B2B") // B2B, B2C
+  placeOfSupply String?
+  subtotal   Float    @default(0)
+  cgst       Float    @default(0)
+  sgst       Float    @default(0)
+  igst       Float    @default(0)
+  grandTotal Float    @default(0)
+  status     String   @default("Draft") // Draft, Finalized, Paid
+  // e-invoicing
+  irn        String? // 64-char Invoice Reference Number (once finalized, if AATO > 5cr B2B)
+  ackNo      String?
+  ewayBillNo String?
+  createdAt  DateTime @default(now())
+  tallyPushedAt DateTime? // stamped by voucher-ack (Wave D Tally connector)
+
+  lines InvoiceLine[]
+
+  @@index([tenantId, status])
+}
+
+model InvoiceLine {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  hsn         String?
+  qty         Float   @default(1)
+  unitPrice   Float   @default(0)
+  taxRate     Float   @default(18)
+  lineTotal   Float   @default(0)
+}
+
+// ─────────────────────────────────────────────────────────────
+// PLATFORM — Phase A (notifications, jobs, files, payments, billing)
+// New models use a scalar tenantId (indexed, no FK) to avoid Tenant back-relations.
+// ─────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String? // null = whole tenant
+  type      String   @default("info")
+  title     String
+  body      String   @default("")
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, userId, read])
+}
+
+model Job {
+  id        String   @id @default(cuid())
+  tenantId  String?
+  type      String // payroll.reminder, sla.ageing, report.scheduled, ...
+  runAt     DateTime
+  status    String   @default("pending") // pending, done, failed
+  payload   String   @default("{}")
+  result    String?
+  createdAt DateTime @default(now())
+
+  @@index([status, runAt])
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  tenantId     String
+  entity       String // "Employee", "Invoice", ...
+  entityId     String
+  filename     String
+  url          String // storage path/URL
+  mime         String?
+  size         Int      @default(0)
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId, entity, entityId])
+}
+
+// Cross-module labels (Wave A). module+recordId is polymorphic — no Prisma relation
+// to the target record, same pattern as Attachment.entity/entityId above.
+model Tag {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  color     String   @default("gray")
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model TagLink {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tagId     String
+  module    String // "leads" | "opportunities" | ... — no relation (polymorphic, see Tag comment)
+  recordId  String
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, tagId, module, recordId])
+  @@index([tenantId, module, recordId])
+}
+
+// Wave B: reusable T&C / payment-terms templates for the quotation builder.
+// Same scalar tenantId (no FK) convention as Tag/TagLink above.
+model QuoteTerms {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  kind      String // "terms" | "payment"
+  body      String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, kind])
+}
+
+// Wave E: saved list-page filter/search state. Same scalar tenantId (no FK)
+// convention as Tag/TagLink/QuoteTerms above.
+model SavedSearch {
+  id        String   @id @default(cuid())
+  tenantId  String
+  module    String // list-page module key e.g. "leads"
+  name      String
+  params    String   @default("{}") // serialized querystring/filter state as JSON
+  ownerId   String? // null = shared with whole tenant
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, module, name])
+  @@index([tenantId, module])
+}
+
+// Wave C: Service & AMC suite. Same scalar tenantId (no FK) convention as
+// Tag/TagLink/QuoteTerms above.
+model Contract {
+  id        String   @id @default(cuid())
+  tenantId  String
+  number    String
+  name      String
+  accountId String?
+  account   Account? @relation(fields: [accountId], references: [id])
+  type      String   @default("AMC") // picklist-backed: contract_type
+  status    String   @default("Active") // picklist-backed: contract_status
+  startDate DateTime
+  endDate   DateTime
+  value     Float    @default(0)
+  visitQuota Int     @default(0) // planned preventive visits per contract year
+  renewalNoticeDays Int @default(30)
+  notes     String?
+  custom    String   @default("{}") // Studio custom-field values (JSON)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  updatedById String?
+
+  @@index([tenantId, status])
+  @@index([tenantId, endDate])
+}
+
+// Installed-base per account, distinct from the Product master. contractId is
+// scalar-only, polymorphic-lite (no Contract relation — same pattern as
+// Quotation.contactId / Ticket.contractId above).
+model InstalledProduct {
+  id            String    @id @default(cuid())
+  tenantId      String
+  accountId     String
+  account       Account   @relation(fields: [accountId], references: [id])
+  productId     String?
+  product       Product?  @relation(fields: [productId], references: [id])
+  contractId    String?
+  name          String // denormalized display name
+  serialNo      String?
+  installedAt   DateTime?
+  warrantyUntil DateTime?
+  location      String?
+  custom        String    @default("{}") // Studio custom-field values (JSON)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
+  updatedById   String?
+
+  @@index([tenantId, accountId])
+  @@index([tenantId, serialNo])
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  tenantId  String
+  invoiceId String?
+  amount    Float    @default(0)
+  method    String   @default("Manual") // Manual, UPI, Razorpay, NEFT, Cash
+  reference String?
+  receiptNo String
+  status    String   @default("Success") // Success, Pending, Failed
+  provider  String? // razorpay, ...
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, invoiceId])
+}
+
+model Subscription {
+  id               String    @id @default(cuid())
+  tenantId         String    @unique
+  plan             String    @default("free") // free, growth, scale
+  seats            Int       @default(5)
+  status           String    @default("active") // active, past_due, canceled
+  provider         String?
+  providerRef      String?
+  currentPeriodEnd DateTime?
+  createdAt        DateTime  @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────
+// FINANCE — Double-entry General Ledger
+// ─────────────────────────────────────────────────────────────
+
+model LedgerAccount {
+  id        String   @id @default(cuid())
+  tenantId  String
+  code      String // e.g. "1000"
+  name      String // "Cash", "Accounts Receivable"
+  type      String // Asset, Liability, Equity, Income, Expense
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, type])
+}
+
+model JournalEntry {
+  id        String   @id @default(cuid())
+  tenantId  String
+  date      DateTime @default(now())
+  narration String
+  reference String? // "INV-2026-501", "Payroll Jun 2026"
+  source    String   @default("manual") // manual, invoice, payment, payroll
+  createdAt DateTime @default(now())
+
+  lines JournalLine[]
+
+  @@index([tenantId, date])
+}
+
+model JournalLine {
+  id             String       @id @default(cuid())
+  journalEntryId String
+  entry          JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  tenantId       String
+  accountId      String // LedgerAccount id
+  accountCode    String // denormalized for reporting
+  debit          Float        @default(0)
+  credit         Float        @default(0)
+
+  @@index([tenantId, accountId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// FINANCE — Accounts Payable (vendor bills) + Bank reconciliation
+// ─────────────────────────────────────────────────────────────
+
+model VendorBill {
+  id         String   @id @default(cuid())
+  tenantId   String
+  vendor     String
+  gstin      String?
+  billNumber String
+  date       DateTime @default(now())
+  dueDate    DateTime?
+  subtotal   Float    @default(0)
+  tax        Float    @default(0)
+  total      Float    @default(0)
+  status     String   @default("Draft") // Draft, Approved, Paid
+  source     String   @default("manual") // manual, ocr
+  createdAt  DateTime @default(now())
+
+  lines VendorBillLine[]
+
+  @@index([tenantId, status])
+}
+
+model VendorBillLine {
+  id           String     @id @default(cuid())
+  vendorBillId String
+  bill         VendorBill @relation(fields: [vendorBillId], references: [id], onDelete: Cascade)
+  description  String
+  hsn          String?
+  qty          Float      @default(1)
+  unitPrice    Float      @default(0)
+  taxRate      Float      @default(18)
+  lineTotal    Float      @default(0)
+}
+
+model BankTransaction {
+  id          String   @id @default(cuid())
+  tenantId    String
+  date        DateTime
+  description String
+  amount      Float    @default(0)
+  direction   String   @default("credit") // credit = money in, debit = money out
+  reconciled  Boolean  @default(false)
+  matchedType String? // payment, vendorbill, journal
+  matchedId   String?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, reconciled])
+}
+
+// ─────────────────────────────────────────────────────────────
+// ORBIT STUDIO — tenant configuration layer (see STUDIO-BUILD-TASKS.md)
+// Scalar tenantId (indexed, no FK) per the Phase-A convention above.
+// JSON stored as String (SQLite has no Json type) — same pattern as
+// EventLog.payload / Role.permissions. Validate via lib/studio/*.
+// ─────────────────────────────────────────────────────────────
+
+model ModuleConfig {
+  id             String   @id @default(cuid())
+  tenantId       String
+  module         String // "lead" | "account" | ... (string key — custom-module ready)
+  labelSingular  String
+  labelPlural    String
+  enabled        Boolean  @default(true)
+  inNav          Boolean  @default(true)
+  navGroup       String?
+  navOrder       Int      @default(0)
+  inGlobalSearch Boolean  @default(true)
+  updatedAt      DateTime @default(now()) @updatedAt
+  updatedById    String?
+
+  @@unique([tenantId, module])
+  @@index([tenantId])
+}
+
+model FieldDef {
+  id           String   @id @default(cuid())
+  tenantId     String
+  module       String
+  code         String // immutable: "name" (system) | "c_vehicle_number" (custom)
+  label        String
+  type         String // text|longtext|number|currency|date|datetime|checkbox|picklist|multipicklist|phone|email|url|lookup
+  system       Boolean  @default(false) // system fields: relabel/hide/require only
+  required     Boolean  @default(false)
+  helpText     String?
+  picklistId   String? // when type = picklist | multipicklist
+  lookupModule String? // when type = lookup
+  archived     Boolean  @default(false)
+  sortOrder    Int      @default(0)
+  updatedAt    DateTime @default(now()) @updatedAt
+  updatedById  String?
+
+  @@unique([tenantId, module, code])
+  @@index([tenantId, module])
+}
+
+model PicklistDef {
+  id       String  @id @default(cuid())
+  tenantId String
+  key      String // "lead_status" | "opportunity_stage" | "ticket_status" | custom keys
+  label    String
+  system   Boolean @default(false) // system lists cannot be deleted; options remain editable
+
+  options PicklistOption[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+}
+
+model PicklistOption {
+  id            String      @id @default(cuid())
+  picklistDefId String
+  picklist      PicklistDef @relation(fields: [picklistDefId], references: [id], onDelete: Cascade)
+  value         String // immutable; existing DB strings become values (no row migration)
+  label         String
+  tone          String? // badge tone key
+  category      String? // semantic anchor: open|won|lost|converted|dead|paid|marketplace|inbound|manual...
+  meta          String  @default("{}") // JSON: e.g. { "probability": 50 } for opportunity stages
+  sortOrder     Int     @default(0)
+  isDefault     Boolean @default(false)
+  archived      Boolean @default(false)
+
+  @@unique([picklistDefId, value])
+}
+
+model LayoutDef {
+  id          String   @id @default(cuid())
+  tenantId    String
+  module      String
+  kind        String // form | record | list | card
+  spec        String   @default("{}") // versioned JSON document rendered by ConfigForm/ConfigList/RecordPage
+  version     Int      @default(1)
+  updatedAt   DateTime @default(now()) @updatedAt
+  updatedById String?
+
+  @@unique([tenantId, module, kind])
+  @@index([tenantId, module])
+}
+
+model ConvertMap {
+  id           String  @id @default(cuid())
+  tenantId     String
+  sourceModule String // "lead"
+  targetModule String // "account" | "contact" | "opportunity"
+  enabled      Boolean @default(true)
+  required     Boolean @default(false)
+  mappings     String  @default("[]") // JSON: [{ "source": "company", "target": "name" }, ...] incl. c_* codes
+
+  @@unique([tenantId, sourceModule, targetModule])
+}
+
+model DedupeRule {
+  id       String  @id @default(cuid())
+  tenantId String
+  module   String
+  fields   String  @default("[]") // JSON: [["email"],["phone"]] = (email) OR (phone); inner arrays ANDed
+  mode     String  @default("warn") // warn | block
+  enabled  Boolean @default(true)
+
+  @@unique([tenantId, module])
+}
+
+model NumberFormat {
+  id       String @id @default(cuid())
+  tenantId String
+  module   String // "invoice" | "receipt" | "quotation" | "lead" | "ticket"
+  format   String // e.g. "INV-{YYYY}-{seq}" — tokens: {prefix} {FY} {YYYY} {seq:N}
+  nextSeq  Int    @default(1) // allocated via atomic increment inside the creating transaction
+
+  @@unique([tenantId, module])
+}
+
+model StudioChangeLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  actorId   String?
+  source    String   @default("ui") // ui | ai | template | system
+  object    String // "FieldDef" | "PicklistOption" | "ModuleConfig" | ...
+  objectId  String
+  action    String // create | update | archive | apply_pack
+  before    String? // JSON snapshot
+  after     String? // JSON snapshot
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// WAVE D — Calls, WhatsApp/SMS messaging, Tally connector
+// Scalar tenantId (indexed, no FK) — same Tag/QuoteTerms convention.
+// JSON stored as String @default("{}") (SQLite has no Json type).
+// ─────────────────────────────────────────────────────────────
+
+model Call {
+  id             String    @id @default(cuid())
+  tenantId       String
+  direction      String // "inbound" | "outbound"
+  fromNumber     String
+  toNumber       String
+  status         String // normalized: "initiated" | "answered" | "completed" | "missed" | "failed"
+  durationSec    Int?
+  providerCallId String?
+  ownerId        String?
+  leadId         String?
+  contactId      String?
+  accountId      String? // all scalar, matched by phone at ingest
+  notes          String?
+  summary        String? // AI later
+  startedAt      DateTime
+  endedAt        DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([tenantId, startedAt])
+  @@index([tenantId, providerCallId])
+}
+
+model MessageLog {
+  id             String   @id @default(cuid())
+  tenantId       String
+  channel        String // "whatsapp" | "sms"
+  direction      String
+  toNumber       String
+  templateKey    String?
+  body           String
+  providerMsgId  String?
+  deliveryStatus String   @default("queued") // "queued" | "sent" | "delivered" | "read" | "failed"
+  error          String?
+  entity         String? // polymorphic-lite
+  entityId       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, providerMsgId])
+}
+
+// Mirror of Tally ledger masters — read-only in-app, written by the connector.
+model TallyLedger {
+  id             String   @id @default(cuid())
+  tenantId       String
+  name           String
+  tallyGuid      String?
+  group          String?
+  closingBalance Float    @default(0)
+  outstanding    Float    @default(0)
+  raw            String   @default("{}")
+  lastSyncedAt   DateTime
+
+  @@unique([tenantId, name])
+}
+
+model ConnectorState {
+  id                String    @id @default(cuid())
+  tenantId          String
+  kind              String // "tally"
+  keyHash           String // SHA-256 hex of the connector token — plaintext shown ONCE at generation, never stored
+  status            String    @default("never-connected")
+  lastSeenAt        DateTime?
+  lastLedgerSyncAt  DateTime?
+  lastVoucherPushAt DateTime?
+  meta              String    @default("{}")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
+
+  @@unique([tenantId, kind])
+}

@@ -97,9 +97,9 @@ export default function ExitPage() {
       router.replace('/');
       return;
     }
-    setIsHr(u.roles.some((r) => ['CEO', 'HR', 'FINANCE'].includes(r)));
+    setIsHr(u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r)));
     setHasEmployee(!!u.employeeId);
-    if (u.roles.some((r) => ['CEO', 'HR', 'FINANCE'].includes(r))) load();
+    if (u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r))) load();
   }, [router]);
 
   async function resign() {

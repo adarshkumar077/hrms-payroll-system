@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, getStoredUser, getApiBaseUrl } from '@/lib/api';
+import { api, getStoredUser, getApiBaseUrl, getToken } from '@/lib/api';
 
 type EsdRow = {
   employeeCode: string;
@@ -60,7 +60,7 @@ export default function EsdSheetPage() {
       return;
     }
 
-    const hrAccess = u.roles.some((r) => ['CEO', 'HR'].includes(r));
+    const hrAccess = u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r));
     setIsHr(hrAccess);
     setEmployeeId(u.employeeId ?? null);
 
@@ -125,18 +125,27 @@ export default function EsdSheetPage() {
   }
 
   function exportFile(format: 'excel' | 'pdf') {
-    const token = localStorage.getItem('eitf_access_token');
+    const token = getToken();
     const baseUrl = getApiBaseUrl();
     const params = new URLSearchParams();
     if (filterMonth) params.set('month', filterMonth);
     if (filterYear) params.set('year', filterYear);
     if (searchQuery) params.set('search', searchQuery);
     const url = `${baseUrl}/reports/esd/export/${format}?${params.toString()}`;
-    const link = document.createElement('a');
-    link.href = url;
-    if (token) link.href += `&token=${token}`;
-    link.download = `esd-sheet.${format === 'excel' ? 'xlsx' : 'pdf'}`;
-    link.click();
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        return res.blob();
+      })
+      .then((blob) => {
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = `esd-sheet.${format === 'excel' ? 'xlsx' : 'pdf'}`;
+        link.click();
+        URL.revokeObjectURL(objectUrl);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Export failed'));
   }
 
   if (loading) {

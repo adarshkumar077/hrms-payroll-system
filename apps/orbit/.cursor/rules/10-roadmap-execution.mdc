@@ -1,0 +1,25 @@
+---
+description: How to execute ROADMAP-V2 tasks (Wave A–F, task IDs A1–F8) — read when working on any roadmap task
+alwaysApply: false
+---
+
+# Executing ROADMAP-V2 tasks in this repo
+
+The task board is ROADMAP-V2-TASKS.md (41 tasks, IDs A1–F8, with owners, dependencies ⛔, and per-task notes). The why/evidence behind each wave is ROADMAP-V2.md. Work strictly one task ID per chat/composer session.
+
+## Per-task procedure
+1. Read the task's row in ROADMAP-V2-TASKS.md + its wave's section in ROADMAP-V2.md. Respect ⛔ blockers — never start a blocked task.
+2. Schema tasks (A1, B1, C1, F1, and any model added later) come FIRST in a wave and touch BOTH prisma files + `npm run db:push`. No other task in the wave may edit schemas.
+3. Copy the cited exemplar file's pattern; do not invent new patterns.
+4. Write/extend unit tests for any pure logic (totals engines, date maths, parsers) BEFORE the UI that uses it — vitest, table-driven like lib/compliance tests.
+5. Run the gate locally: `npm test` → `npx tsc --noEmit` → relevant Playwright spec → live smoke on :3000.
+6. Commit as `feat(<taskID>): <what>` (e.g. `feat(A2): Activities list + My Day view`). One task = one commit (or small commit train). Docs-only changes = `docs:`.
+7. Tick the task off by editing ROADMAP-V2-TASKS.md (append ✅ + date to the row) and add one line to docs/ai/STATE.md when a wave completes.
+
+## Task sizing / token discipline
+- One task ID per session; start a fresh chat per task (small context beats a giant one).
+- Mechanical sweep tasks (A5, B5, C6, D7, E3, F7) are pattern-replication: use the cheapest capable model; the pattern is fully specified in the task row.
+- If stuck after 2 attempts at the same failure, stop and leave a note in the task row instead of grinding.
+
+## Definition of done (per wave — do not declare a wave shipped without ALL of these)
+- `npm test` green (incl. the wave's new units) · `npx tsc --noEmit` clean on the root app · `npx playwright test` green · both Prisma schemas in sync · live smoke of the wave's golden flow · STATE.md updated · commits pushed on the wave branch.

@@ -64,7 +64,7 @@ export class LeaveService {
   }
 
   private isHr(user: AuthUser) {
-    const allowed: string[] = [RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER];
+    const allowed: string[] = [RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN];
     return user.roles.some((r) => allowed.includes(r));
   }
 
@@ -97,7 +97,7 @@ export class LeaveService {
       create: {
         companyId,
         name: 'default',
-        stepsJson: [{ step: 1, role: 'MANAGER' }, { step: 2, role: 'HR' }],
+        stepsJson: [{ step: 1, role: 'ADMIN' }, { step: 2, role: 'HR' }],
       },
       update: {},
     });
@@ -129,6 +129,11 @@ export class LeaveService {
   }
 
   async balancesForEmployee(companyId: string, employeeId: string, year?: number) {
+    const emp = await this.prisma.employee.findFirst({
+      where: { id: employeeId, companyId },
+      select: { id: true },
+    });
+    if (!emp) throw new NotFoundException('Employee not found');
     const y = year ?? new Date().getFullYear();
     const types = await this.ensureDefaultTypes(companyId);
     const rows = [];
@@ -307,7 +312,7 @@ export class LeaveService {
       where: { companyId: user.companyId, isActive: true },
     });
     const steps = (chain?.stepsJson as { step: number; role: string }[]) ?? [
-      { step: 1, role: 'MANAGER' },
+      { step: 1, role: 'ADMIN' },
       { step: 2, role: 'HR' },
     ];
 
@@ -337,7 +342,7 @@ export class LeaveService {
             create: steps.map((s) => ({
               stepOrder: s.step,
               approverRole: s.role,
-              approverId: s.role === 'MANAGER' ? emp.reportingToId : undefined,
+              approverId: s.role === 'ADMIN' ? emp.reportingToId : undefined,
               status:
                 !leaveType.requiresApproval && s.step === 1
                   ? LeaveApplicationStatus.APPROVED
@@ -401,7 +406,7 @@ export class LeaveService {
         companyId: applicant.companyId,
         status: 'ACTIVE',
         userRoles: {
-          some: { role: { code: { in: [RoleCode.HR, RoleCode.CEO] } } },
+          some: { role: { code: { in: [RoleCode.HR, RoleCode.SUPER_ADMIN] } } },
         },
       },
       include: { employee: { select: { id: true } } },
@@ -475,7 +480,7 @@ export class LeaveService {
   }
 
   async approvalQueue(user: AuthUser) {
-    if (!this.isHr(user) && !user.roles.includes(RoleCode.MANAGER)) {
+    if (!this.isHr(user) && !user.roles.includes(RoleCode.ADMIN)) {
       throw new ForbiddenException();
     }
 
@@ -484,13 +489,13 @@ export class LeaveService {
       status: LeaveApplicationStatus.PENDING,
     };
 
-    if (user.roles.includes(RoleCode.MANAGER) && !user.roles.includes(RoleCode.HR) && !user.roles.includes(RoleCode.CEO)) {
+    if (user.roles.includes(RoleCode.ADMIN) && !user.roles.includes(RoleCode.HR) && !user.roles.includes(RoleCode.SUPER_ADMIN)) {
       where.steps = {
         some: {
           status: LeaveApplicationStatus.PENDING,
           OR: [
             { approverId: user.employeeId ?? undefined },
-            { approverRole: 'MANAGER' },
+            { approverRole: 'ADMIN' },
           ],
         },
       };
@@ -514,8 +519,8 @@ export class LeaveService {
 
   async review(user: AuthUser, id: string, dto: ReviewLeaveDto) {
     const isPrivileged =
-      user.roles.includes(RoleCode.CEO) || user.roles.includes(RoleCode.HR);
-    const isManager = user.roles.includes(RoleCode.MANAGER);
+      user.roles.includes(RoleCode.SUPER_ADMIN) || user.roles.includes(RoleCode.HR);
+    const isManager = user.roles.includes(RoleCode.ADMIN);
     if (!isPrivileged && !isManager) throw new ForbiddenException();
     if (
       dto.status !== LeaveApplicationStatus.APPROVED &&
@@ -545,7 +550,7 @@ export class LeaveService {
     if (!isPrivileged) {
       const canAct =
         (current.approverId && current.approverId === user.employeeId) ||
-        (current.approverRole === 'MANAGER' &&
+        (current.approverRole === 'ADMIN' &&
           app.employee.reportingToId === user.employeeId);
       if (!canAct) {
         throw new ForbiddenException('You are not authorized to review this application');

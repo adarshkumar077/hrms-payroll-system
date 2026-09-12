@@ -1,6 +1,11 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { IntegrationProvider, Prisma } from '@prisma/client';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createHash, randomBytes } from 'crypto';
+import { IntegrationProvider, Prisma, AuditAction } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { encryptSecret } from '../common/secret-crypto';
+import { AuditService } from '../audit/audit.service';
+import { AuthUser } from '../auth/decorators/current-user.decorator';
 
 const DEFAULT_PROVIDERS: IntegrationProvider[] = [
   IntegrationProvider.EMAIL,
@@ -9,13 +14,25 @@ const DEFAULT_PROVIDERS: IntegrationProvider[] = [
   IntegrationProvider.BIOMETRIC_ESSL,
   IntegrationProvider.GOOGLE_CALENDAR,
   IntegrationProvider.ACCOUNTING,
+  IntegrationProvider.GMAIL,
+  IntegrationProvider.OUTLOOK,
+  IntegrationProvider.SLACK,
+  IntegrationProvider.TEAMS,
+  IntegrationProvider.GOOGLE_DRIVE,
+  IntegrationProvider.ONEDRIVE,
+  IntegrationProvider.REST_API,
+  IntegrationProvider.WEBHOOK,
 ];
 
 @Injectable()
 export class IntegrationsService {
   private readonly logger = new Logger(IntegrationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    private readonly audit: AuditService,
+  ) {}
 
   async ensureDefaults(companyId: string) {
     for (const provider of DEFAULT_PROVIDERS) {
@@ -218,5 +235,104 @@ export class IntegrationsService {
         lastSyncAt: new Date(),
       },
     });
+  }
+
+  async connect(user: AuthUser, provider: IntegrationProvider, secrets?: Record<string, string>) {
+    const encrypted = secrets
+      ? Object.fromEntries(
+          Object.entries(secrets).map(([k, v]) => [k, encryptSecret(this.config, v)]),
+        )
+      : {};
+    const row = await this.upsertConfig(user.companyId, provider, {
+      isEnabled: true,
+      configJson: { connectedAt: new Date().toISOString(), secrets: encrypted, hasSecrets: Object.keys(encrypted).length > 0 },
+    });
+    await this.logEvent(user.companyId, provider, 'connect', { actorId: user.id }, 'CONNECTED');
+    await this.audit.log({
+      companyId: user.companyId,
+      actorId: user.id,
+      action: AuditAction.SETTINGS_CHANGE,
+      entityType: 'IntegrationConfig',
+      entityId: row.id,
+      metadata: { event: 'connect', provider },
+    });
+    return { ok: true, provider, isEnabled: true };
+  }
+
+  async disconnect(user: AuthUser, provider: IntegrationProvider) {
+    const row = await this.upsertConfig(user.companyId, provider, { isEnabled: false, configJson: {} });
+    await this.logEvent(user.companyId, provider, 'disconnect', { actorId: user.id }, 'DISCONNECTED');
+    await this.audit.log({
+      companyId: user.companyId,
+      actorId: user.id,
+      action: AuditAction.SETTINGS_CHANGE,
+      entityType: 'IntegrationConfig',
+      entityId: row.id,
+      metadata: { event: 'disconnect', provider },
+    });
+    return { ok: true, provider, isEnabled: false };
+  }
+
+  async testConnection(user: AuthUser, provider: IntegrationProvider) {
+    const cfg = await this.prisma.integrationConfig.findUnique({
+      where: { companyId_provider: { companyId: user.companyId, provider } },
+    });
+    const ok = Boolean(cfg?.isEnabled);
+    const status = ok ? 'OK' : 'NOT_CONNECTED';
+    await this.logEvent(user.companyId, provider, 'test', { actorId: user.id }, status);
+    return { ok, provider, status, latencyMs: 12, stub: true };
+  }
+
+  async refresh(user: AuthUser, provider: IntegrationProvider) {
+    await this.logEvent(user.companyId, provider, 'refresh', { actorId: user.id }, 'REFRESHED');
+    return { ok: true, provider, syncedAt: new Date().toISOString(), stub: true };
+  }
+
+  async createApiKey(user: AuthUser, name: string) {
+    const raw = `eitf_${randomBytes(24).toString('hex')}`;
+    const row = await this.prisma.integrationApiKey.create({
+      data: {
+        companyId: user.companyId,
+        name,
+        keyPrefix: raw.slice(0, 12),
+        secretHash: createHash('sha256').update(raw).digest('hex'),
+        encryptedSecret: encryptSecret(this.config, raw),
+        createdBy: user.id,
+      },
+    });
+    await this.audit.log({
+      companyId: user.companyId,
+      actorId: user.id,
+      action: AuditAction.CREATE,
+      entityType: 'IntegrationApiKey',
+      entityId: row.id,
+    });
+    return { id: row.id, name: row.name, keyPrefix: row.keyPrefix, secret: raw, once: true };
+  }
+
+  async listApiKeys(companyId: string) {
+    const rows = await this.prisma.integrationApiKey.findMany({
+      where: { companyId, revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      keyPrefix: r.keyPrefix,
+      lastUsedAt: r.lastUsedAt,
+      createdAt: r.createdAt,
+    }));
+  }
+
+  async revokeApiKey(user: AuthUser, id: string) {
+    const row = await this.prisma.integrationApiKey.findFirst({
+      where: { id, companyId: user.companyId },
+    });
+    if (!row) throw new NotFoundException('API key not found');
+    await this.prisma.integrationApiKey.update({
+      where: { id },
+      data: { revokedAt: new Date() },
+    });
+    return { ok: true };
   }
 }

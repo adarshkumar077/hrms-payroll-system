@@ -26,25 +26,25 @@ export class EmployeesController {
   ) {}
 
   @Get('employees')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.FINANCE, RoleCode.ADMIN)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN, RoleCode.ADMIN)
   list(@CurrentUser() user: AuthUser, @Query() query: EmployeeQueryDto) {
     return this.employees.list(user.companyId, query);
   }
 
   @Post('employees')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateEmployeeDto) {
     return this.employees.create(user, dto);
   }
 
   @Get('employees/next-code')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   nextCode(@CurrentUser() user: AuthUser) {
     return this.employees.suggestNextCode(user.companyId);
   }
 
   @Get('employees/check-code')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   checkCode(
     @CurrentUser() user: AuthUser,
     @Query('code') code: string,
@@ -54,13 +54,13 @@ export class EmployeesController {
   }
 
   @Get('employees/:id')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.FINANCE, RoleCode.ADMIN)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN, RoleCode.ADMIN)
   getOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.employees.getById(user.companyId, id);
   }
 
   @Put('employees/:id')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   update(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -70,7 +70,7 @@ export class EmployeesController {
   }
 
   @Patch('employees/:id/status')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   updateStatus(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -80,7 +80,7 @@ export class EmployeesController {
   }
 
   @Post('employees/:id/credentials/reset')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   resetCredentials(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -90,13 +90,13 @@ export class EmployeesController {
   }
 
   @Get('employees/:id/login-info')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   loginInfo(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.employees.getLoginInfo(user, id);
   }
 
   @Patch('employees/:id/username')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   changeUsername(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -106,20 +106,20 @@ export class EmployeesController {
   }
 
   @Post('employees/:id/account/lock')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   lockAccount(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.employees.setAccountLock(user, id, true);
   }
 
   @Post('employees/:id/account/unlock')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   unlockAccount(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.employees.setAccountLock(user, id, false);
   }
 
   /** Soft-remove: deactivate employee + disable login. CEO/HR. */
   @Delete('employees/:id')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   remove(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -149,13 +149,13 @@ export class EmployeesController {
   }
 
   @Get('employees/:id/payroll-config')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.EMPLOYEE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE, RoleCode.ADMIN)
   getPayrollConfig(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.employeePayroll.getConfig(user, id);
   }
 
   @Put('employees/:id/payroll-config')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   upsertPayrollConfig(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -165,13 +165,13 @@ export class EmployeesController {
   }
 
   @Get('employees/:id/payroll-history')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.EMPLOYEE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE, RoleCode.ADMIN)
   payrollHistory(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.employeePayroll.payrollHistory(user, id);
   }
 
   @Get('employees/:id/salary-tracker')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.EMPLOYEE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE, RoleCode.ADMIN)
   salaryTracker(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

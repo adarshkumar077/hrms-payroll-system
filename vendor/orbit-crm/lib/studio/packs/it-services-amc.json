@@ -1,0 +1,31 @@
+{
+  "key": "it-services-amc",
+  "name": "IT Services & AMC",
+  "industry": "IT Services / Annual Maintenance Contracts",
+  "description": "Field-service ticketing and AMC contract tracking for IT service providers — preventive visits, breakdown repairs, and installation calls billed against a customer's active contract.",
+  "modules": [
+    { "module": "tickets", "labelSingular": "Service Ticket", "labelPlural": "Service Tickets" }
+  ],
+  "picklists": [
+    {
+      "key": "ticket_type",
+      "label": "Ticket Type",
+      "options": [
+        { "value": "AMC Preventive Visit" },
+        { "value": "Breakdown Repair" },
+        { "value": "Delivery & Installation" },
+        { "value": "Site Survey" },
+        { "value": "Service Under AMC" },
+        { "value": "Standard Charges" }
+      ]
+    }
+  ],
+  "fields": [
+    { "module": "tickets", "label": "Ticket Type", "type": "picklist", "required": true, "picklistKey": "ticket_type" },
+    { "module": "tickets", "label": "AMC Contract No", "type": "text" },
+    { "module": "tickets", "label": "Serial Number", "type": "text" },
+    { "module": "tickets", "label": "Ticket Charges", "type": "currency" },
+    { "module": "accounts", "label": "PAN Number", "type": "text" },
+    { "module": "accounts", "label": "Customer Code", "type": "text" }
+  ]
+}

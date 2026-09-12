@@ -103,11 +103,11 @@ export class EmployeesService {
   ) {}
 
   private isHrOrCeo(user: AuthUser) {
-    return user.roles.includes(RoleCode.CEO) || user.roles.includes(RoleCode.HR);
+    return user.roles.includes(RoleCode.SUPER_ADMIN) || user.roles.includes(RoleCode.HR);
   }
 
   private isCeo(user: AuthUser) {
-    return user.roles.includes(RoleCode.CEO);
+    return user.roles.includes(RoleCode.SUPER_ADMIN);
   }
 
   private assertNotProtectedSuperAdmin(
@@ -542,7 +542,8 @@ export class EmployeesService {
         loginId: saved.employeeCode,
         username: loginUsername,
         email: loginUsername,
-        password: plainPassword,
+        /** Password was set — communicate to employee through a secure channel (never in API response). */
+        passwordDelivered: true,
       },
     };
   }
@@ -901,10 +902,7 @@ export class EmployeesService {
       `${emp.employeeCode.toLowerCase()}@eitf.local`;
 
     let password = opts?.password;
-    if (!password && opts?.generatePassword) {
-      password = this.generatePassword();
-    }
-    if (!password) throw new BadRequestException('Password required');
+    if (!password) throw new BadRequestException('Password required — set explicitly for security (auto-generate disabled)');
     if (password.length < 5) {
       throw new BadRequestException('Password must be at least 5 characters');
     }
@@ -969,8 +967,8 @@ export class EmployeesService {
       loginId: user.loginId ?? emp.employeeCode,
       username: user.loginId ?? emp.employeeCode,
       email: user.email,
-      password,
       userId: user.id,
+      message: 'Credentials reset. Deliver the new password to the employee through a secure channel.',
     };
   }
 

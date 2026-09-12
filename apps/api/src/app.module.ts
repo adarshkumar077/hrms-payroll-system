@@ -23,6 +23,11 @@ import { ReportsModule } from './reports/reports.module';
 import { SecurityModule } from './security/security.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { AiModule } from './ai/ai.module';
+import { AdminModule } from './admin/admin.module';
+import { HelpDocsModule } from './help-docs/help-docs.module';
+import { StudioModule } from './studio/studio.module';
+import { DataExchangeModule } from './data-exchange/data-exchange.module';
+import { CrmModule } from './crm/crm.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { IpAllowlistGuard } from './security/ip-allowlist.guard';
@@ -51,7 +56,12 @@ import { Require2faGuard } from './security/require-2fa.guard';
     SecurityModule,
     IntegrationsModule,
     AiModule,
-    HealthModule,
+    AdminModule,
+    HelpDocsModule,
+    StudioModule,
+    DataExchangeModule,
+    CrmModule,
+    HealthModule, // public /health for local + tunnel probes
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

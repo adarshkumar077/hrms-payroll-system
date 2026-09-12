@@ -37,7 +37,7 @@ export default function LeaveApprovalsPage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => ['CEO', 'HR', 'MANAGER'].includes(r))) {
+    if (!u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r))) {
       router.replace('/dashboard');
       return;
     }

@@ -38,7 +38,7 @@ export default function MyProfilePage() {
       return;
     }
     // Super Admin/HR without employee record should use Company Profile
-    if (u.roles.some((r) => r === 'CEO' || r === 'HR') && !u.employeeId) {
+    if (u.roles.some((r) => r === 'SUPER_ADMIN' || r === 'HR') && !u.employeeId) {
       router.replace('/settings/company');
       return;
     }

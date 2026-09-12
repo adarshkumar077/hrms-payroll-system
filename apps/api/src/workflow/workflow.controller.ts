@@ -13,19 +13,19 @@ export class WorkflowController {
   constructor(private readonly workflow: WorkflowService) {}
 
   @Get('workflows')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   list(@CurrentUser() user: AuthUser) {
     return this.workflow.listWorkflows(user.companyId);
   }
 
   @Get('workflows/:type')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   getOne(@CurrentUser() user: AuthUser, @Param('type') type: string) {
     return this.workflow.getConfig(user.companyId, type.toUpperCase() as WorkflowType);
   }
 
   @Post('workflows/:type/config')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   configure(
     @CurrentUser() user: AuthUser,
     @Param('type') type: string,
@@ -35,19 +35,19 @@ export class WorkflowController {
   }
 
   @Get('approvals/pending')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   pending(@CurrentUser() user: AuthUser) {
     return this.workflow.listPending(user);
   }
 
   @Get('approvals/mine')
-  @Roles(RoleCode.EMPLOYEE, RoleCode.MANAGER, RoleCode.HR, RoleCode.CEO, RoleCode.FINANCE)
+  @Roles(RoleCode.EMPLOYEE, RoleCode.ADMIN, RoleCode.HR, RoleCode.SUPER_ADMIN, RoleCode.ADMIN)
   mine(@CurrentUser() user: AuthUser) {
     return this.workflow.listMine(user);
   }
 
   @Get('approvals/history')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   history(
     @CurrentUser() user: AuthUser,
     @Query('status') status?: string,
@@ -56,13 +56,13 @@ export class WorkflowController {
   }
 
   @Get('approvals/:id')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.FINANCE, RoleCode.EMPLOYEE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN, RoleCode.EMPLOYEE)
   get(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.workflow.getInstance(user.companyId, id);
   }
 
   @Post('approvals/:instanceId/act')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   act(
     @CurrentUser() user: AuthUser,
     @Param('instanceId') instanceId: string,

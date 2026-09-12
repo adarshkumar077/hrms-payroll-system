@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────────────────────────
+# Orbit — Docker Compose
+#
+#   Default (SQLite, one command):
+#     docker compose up --build
+#     -> app on http://localhost:3000, data persisted in the `orbit-data` volume.
+#
+#   Postgres (production-like):
+#     docker compose --profile postgres up --build
+#     -> starts a postgres:16 `db` service + the app pointed at it.
+#
+# The two app services are mutually exclusive — pick one path.
+# ─────────────────────────────────────────────────────────────
+
+services:
+  # ── Default app: SQLite, zero external deps ──────────────────
+  orbit:
+    build: .
+    image: orbit-business-os
+    ports:
+      - "3000:3000"
+    environment:
+      # SQLite file lives on the mounted volume so it survives restarts.
+      DATABASE_URL: "file:/app/data/orbit.db"
+      AUTH_SECRET: "${AUTH_SECRET:-orbit-dev-secret-change-in-production-please-0123456789}"
+      # Optional AI provider (OpenAI-compatible). Leave unset -> local fallback.
+      LLM_BASE_URL: "${LLM_BASE_URL:-}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_MODEL: "${LLM_MODEL:-}"
+    volumes:
+      - orbit-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # ── Postgres path: db + app (enable with --profile postgres) ─
+  db:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: orbit
+      POSTGRES_PASSWORD: orbit
+      POSTGRES_DB: orbit
+    volumes:
+      - orbit-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbit -d orbit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  orbit-pg:
+    build: .
+    image: orbit-business-os
+    profiles: ["postgres"]
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://orbit:orbit@db:5432/orbit?schema=public"
+      # Use the Postgres flavour of the schema at db push time.
+      PRISMA_SCHEMA: "prisma/schema.postgres.prisma"
+      AUTH_SECRET: "${AUTH_SECRET:-orbit-dev-secret-change-in-production-please-0123456789}"
+      LLM_BASE_URL: "${LLM_BASE_URL:-}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_MODEL: "${LLM_MODEL:-}"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  orbit-data:
+  orbit-pgdata:

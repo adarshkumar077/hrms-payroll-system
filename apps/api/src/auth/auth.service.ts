@@ -29,6 +29,7 @@ import {
   isProtectedSuperAdmin,
   PROTECTED_SUPER_ADMIN_MSG,
 } from './protected-super-admin';
+import { parseUserAgent } from '../common/ua.util';
 
 const INVALID_LOGIN = 'Invalid User ID/Email or Password.';
 
@@ -96,10 +97,10 @@ export class AuthService {
       },
     });
 
-    // Dev/console SMS provider — replace with real gateway later
+    // Never log OTP codes — security requirement
     const provider = this.config.get('SMS_PROVIDER') ?? 'console';
-    if (provider === 'console') {
-      console.log(`[OTP] mobile=${dto.mobile} code=${code} ttl=${ttl}s`);
+    if (provider === 'console' && this.config.get('NODE_ENV') !== 'production') {
+      this.logger.debug(`OTP sent to mobile ending ${dto.mobile.slice(-4)} (dev only)`);
     }
 
     return { message: 'If the mobile is registered, an OTP has been sent.', expiresIn: ttl };
@@ -416,8 +417,28 @@ export class AuthService {
       );
     }
 
+    const parsed = parseUserAgent(meta?.ua);
+    try {
+      await this.prisma.loginSession.create({
+        data: {
+          companyId: user.companyId,
+          userId: user.id,
+          ipAddress: meta?.ip,
+          userAgent: meta?.ua,
+          device: parsed.device,
+          browser: parsed.browser,
+          isOnline: true,
+        },
+      });
+    } catch (sessionErr) {
+      this.logger.error(
+        `Login session record failed for user ${user.id}`,
+        sessionErr instanceof Error ? sessionErr.stack : sessionErr,
+      );
+    }
+
     const mustEnable2fa =
-      roles.some((r) => ['CEO', 'HR', 'ADMIN'].includes(r)) &&
+      roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r)) &&
       !user.totpEnabled &&
       (await this.security.getSettingBool(user.companyId, 'security.require_2fa_for_admins', false));
 
@@ -473,6 +494,20 @@ export class AuthService {
       await this.prisma.refreshToken.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: new Date() },
+      });
+    }
+    await this.prisma.loginSession.updateMany({
+      where: { userId, isOnline: true },
+      data: { isOnline: false, logoutAt: new Date() },
+    });
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { companyId: true } });
+    if (user) {
+      await this.audit.log({
+        companyId: user.companyId,
+        actorId: userId,
+        action: AuditAction.LOGOUT,
+        entityType: 'User',
+        entityId: userId,
       });
     }
     return { message: 'Logged out' };
@@ -616,7 +651,7 @@ export class AuthService {
       where: {
         companyId: resolvedCompanyId,
         status: { not: UserStatus.INACTIVE },
-        userRoles: { some: { role: { code: RoleCode.CEO } } },
+        userRoles: { some: { role: { code: RoleCode.SUPER_ADMIN } } },
       },
     });
     return { needsSetup: superAdminCount === 0 };
@@ -635,7 +670,7 @@ export class AuthService {
 
     const email = dto.email.trim();
     const role = await this.prisma.role.findFirst({
-      where: { companyId, code: RoleCode.CEO },
+      where: { companyId, code: RoleCode.SUPER_ADMIN },
     });
     if (!role) {
       throw new BadRequestException('Super Admin role missing. Run database seed first.');
@@ -677,7 +712,7 @@ export class AuthService {
   }
 
   private assertSuperAdmin(actor: AuthUser) {
-    if (!actor.roles.includes(RoleCode.CEO)) {
+    if (!actor.roles.includes(RoleCode.SUPER_ADMIN)) {
       throw new ForbiddenException('Only Super Admin can manage admin accounts.');
     }
   }
@@ -689,7 +724,7 @@ export class AuthService {
         companyId: actor.companyId,
         employeeId: null,
         userRoles: {
-          some: { role: { code: { in: [RoleCode.CEO, RoleCode.HR] } } },
+          some: { role: { code: { in: [RoleCode.SUPER_ADMIN, RoleCode.HR] } } },
         },
       },
       include: { userRoles: { include: { role: true } } },
@@ -781,7 +816,7 @@ export class AuthService {
     }
 
     const roles = user.userRoles.map((ur) => ur.role.code);
-    if (roles.includes(RoleCode.CEO)) {
+    if (roles.includes(RoleCode.SUPER_ADMIN)) {
       throw new ForbiddenException('Super Admin accounts cannot be deactivated through this action.');
     }
     if (!roles.includes(RoleCode.HR)) {

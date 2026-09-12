@@ -49,7 +49,7 @@ export default function NotificationsPage() {
       router.replace('/');
       return;
     }
-    setIsHr(u.roles.some((r) => ['CEO', 'HR'].includes(r)));
+    setIsHr(u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r)));
     load();
   }, [router]);
 

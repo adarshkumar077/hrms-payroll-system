@@ -51,7 +51,7 @@ export default function HolidaysPage() {
       router.replace('/');
       return;
     }
-    setIsHr(u.roles.some((r) => ['CEO', 'HR'].includes(r)));
+    setIsHr(u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r)));
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);

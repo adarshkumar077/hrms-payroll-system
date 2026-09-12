@@ -60,7 +60,7 @@ export default function PerformancePage() {
       return;
     }
 
-    const hrAccess = u.roles.some((r) => ['CEO', 'HR', 'MANAGER'].includes(r));
+    const hrAccess = u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r));
     setIsHr(hrAccess);
     setHasEmployee(!!u.employeeId);
 

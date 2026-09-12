@@ -1,0 +1,21 @@
+---
+description: When the user says Run the Program, start HRMS and verify all four endpoints
+alwaysApply: true
+---
+
+# Run the Program
+
+When the user says **Run the Program** (any casing), do this automatically — do not ask first. Finish only after all reachable endpoints work together.
+
+From this repo root:
+
+1. Start what is down: `npm run db:up`, then `npm run start:localhost` (API+web+quick tunnel). Keep processes running.
+2. Verify **together** (HTTP 200 / `/api/v1/health`):
+   - Frontend (Local): http://localhost:3000
+   - Frontend (LAN): http://192.168.1.69:3000
+   - Frontend (Public): URL in `.public-url.txt` (quick-tunnel host changes each start). Also try any URL the user named.
+   - Backend API: http://localhost:3001/api/v1/health
+3. Also hit `/api/v1/health` via localhost:3000 and the public origin (Next rewrite).
+4. Keep cloudflared forwarding `http://127.0.0.1:3000`. If the tunnel is down, restart it. Free trycloudflare hostnames cannot be reused after they die — publish the new URL.
+5. Smoke Login plus Attendance, Dashboard, Leave, Payroll, Reports, Settings APIs. Fix CORS/routing/startup without breaking features.
+6. Reply with pass/fail per URL, the live public link, and logins: `superadmin`/`Super@123`, `admin`/`Admin@123`, `hr001`/`HR@123`, `emp001`/`Emp@123`.

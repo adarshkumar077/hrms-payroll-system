@@ -36,12 +36,12 @@ export class GrowthService {
   ) {}
 
   private isHr(user: AuthUser) {
-    return user.roles.some((r) => (['CEO', 'HR'] as string[]).includes(r));
+    return user.roles.some((r) => (['SUPER_ADMIN', 'HR'] as string[]).includes(r));
   }
 
   private isManagerish(user: AuthUser) {
     return user.roles.some((r) =>
-      (['CEO', 'HR', 'MANAGER'] as string[]).includes(r),
+      (['SUPER_ADMIN', 'HR', 'ADMIN'] as string[]).includes(r),
     );
   }
 
@@ -524,7 +524,7 @@ export class GrowthService {
   }
 
   async updateTicketStatus(user: AuthUser, id: string, dto: UpdateTicketStatusDto) {
-    if (!this.isHr(user) && !user.roles.includes(RoleCode.MANAGER)) {
+    if (!this.isHr(user) && !user.roles.includes(RoleCode.ADMIN)) {
       throw new ForbiddenException();
     }
     await this.getTicket(user, id);
@@ -543,7 +543,7 @@ export class GrowthService {
   }
 
   async escalate(user: AuthUser, id: string) {
-    if (!this.isHr(user) && !user.roles.includes(RoleCode.MANAGER)) {
+    if (!this.isHr(user) && !user.roles.includes(RoleCode.ADMIN)) {
       throw new ForbiddenException();
     }
     const ticket = await this.getTicket(user, id);

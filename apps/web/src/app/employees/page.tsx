@@ -34,7 +34,7 @@ type CreateEmployeeResponse = EmployeeRow & {
   loginCredentials?: {
     employeeCode: string;
     username: string;
-    password: string;
+    passwordDelivered?: boolean;
   };
 };
 
@@ -158,11 +158,11 @@ export default function EmployeesPage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => ['CEO', 'HR', 'MANAGER', 'FINANCE', 'ADMIN'].includes(r))) {
+    if (!u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN', 'ADMIN', 'ADMIN'].includes(r))) {
       router.replace('/dashboard');
       return;
     }
-    setIsAdmin(u.roles.includes('CEO') || u.roles.includes('HR'));
+    setIsAdmin(u.roles.includes('SUPER_ADMIN') || u.roles.includes('HR'));
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, showInactive]);
@@ -248,11 +248,12 @@ export default function EmployeesPage() {
       setForm(emptyForm());
       load();
       const creds = created.loginCredentials;
-      if (creds) {
+      const pwdUsed = form.password;
+      if (creds && pwdUsed) {
         setCreatedCredentials({
           employeeCode: creds.employeeCode,
           username: creds.username,
-          password: creds.password,
+          password: pwdUsed,
           id: created.id,
         });
       }

@@ -1,3 +1,16 @@
+# EITF HRMS + Payroll + CRM — Production stack
+# One command: docker compose --env-file .env.production up -d --build
+#
+# Public access options (pick one):
+#   A) Cloudflare Tunnel (recommended) — set CLOUDFLARE_TUNNEL_TOKEN, no firewall ports needed
+#   B) Direct VPS — set PUBLIC_HTTP_PORT=80 and configure Let's Encrypt (see docs/PRODUCTION-DEPLOYMENT.md)
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -5,32 +18,174 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-eitf}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eitf_dev_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
       POSTGRES_DB: ${POSTGRES_DB:-eitf_hrms}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - eitf_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eitf} -d ${POSTGRES_DB:-eitf_hrms}"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 20s
+    logging: *default-logging
+    networks: [eitf]
 
   redis:
     image: redis:7-alpine
     container_name: eitf-hrms-redis
     restart: unless-stopped
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
     volumes:
       - eitf_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
-      retries: 10
+      retries: 20
+    logging: *default-logging
+    networks: [eitf]
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: eitf-hrms-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-eitf}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-eitf_hrms}?schema=public&connection_limit=20&pool_timeout=30
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in .env.production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env.production}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+      API_PORT: 3001
+      API_PREFIX: api/v1
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS to your HTTPS origin in .env.production}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
+      LOCAL_STORAGE_DIR: /app/apps/api/uploads
+    volumes:
+      - eitf_uploads:/app/apps/api/uploads
+      - eitf_backups:/app/apps/api/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    logging: *default-logging
+    networks: [eitf]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: eitf-hrms-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      API_INTERNAL_URL: http://api:3001
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    logging: *default-logging
+    networks: [eitf]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: eitf-hrms-nginx
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
+      - eitf_certbot_www:/var/www/certbot:ro
+      - eitf_certbot_certs:/etc/letsencrypt:ro
+    ports:
+      - "${PUBLIC_HTTP_PORT:-${PUBLIC_PORT:-8080}}:80"
+      - "${PUBLIC_HTTPS_PORT:-8443}:443"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    logging: *default-logging
+    networks: [eitf]
+
+  cloudflared:
+    image: cloudflare/cloudflared:2024.12.2
+    container_name: eitf-hrms-tunnel
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      nginx:
+        condition: service_healthy
+    logging: *default-logging
+    networks: [eitf]
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: eitf-hrms-certbot
+    restart: unless-stopped
+    profiles: ["ssl"]
+    volumes:
+      - eitf_certbot_www:/var/www/certbot
+      - eitf_certbot_certs:/etc/letsencrypt
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet; sleep 12h; done"
+    logging: *default-logging
+    networks: [eitf]
+
+  db-backup:
+    image: postgres:16-alpine
+    container_name: eitf-hrms-db-backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-eitf}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-eitf_hrms}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - eitf_db_backups:/backups
+      - ./scripts/backup-db.sh:/usr/local/bin/backup-db.sh:ro
+    entrypoint: ["/bin/sh", "-c", "chmod +x /usr/local/bin/backup-db.sh 2>/dev/null; while true; do /usr/local/bin/backup-db.sh; sleep ${BACKUP_INTERVAL_SEC:-86400}; done"]
+    logging: *default-logging
+    networks: [eitf]
+
+networks:
+  eitf:
+    driver: bridge
 
 volumes:
   eitf_postgres_data:
   eitf_redis_data:
+  eitf_uploads:
+  eitf_backups:
+  eitf_db_backups:
+  eitf_certbot_www:
+  eitf_certbot_certs:

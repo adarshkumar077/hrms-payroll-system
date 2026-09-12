@@ -20,31 +20,31 @@ export class ShiftsController {
   constructor(private readonly shifts: ShiftsService) {}
 
   @Get('shifts')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER, RoleCode.ADMIN)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   list(@CurrentUser() user: AuthUser) {
     return this.shifts.listShifts(user.companyId);
   }
 
   @Post('shifts/seed-defaults')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   seed(@CurrentUser() user: AuthUser) {
     return this.shifts.ensureDefaultShifts(user.companyId);
   }
 
   @Post('shifts')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateShiftDto) {
     return this.shifts.createShift(user.companyId, user.id, dto);
   }
 
   @Put('shifts/:id')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateShiftDto) {
     return this.shifts.updateShift(user.companyId, user.id, id, dto);
   }
 
   @Get('shifts/roster')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   roster(
     @CurrentUser() user: AuthUser,
     @Query('from') from: string,
@@ -56,13 +56,13 @@ export class ShiftsController {
   }
 
   @Post('shifts/assign')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   assign(@CurrentUser() user: AuthUser, @Body() dto: AssignShiftDto) {
     return this.shifts.assign(user.companyId, user.id, dto);
   }
 
   @Post('shifts/assign/bulk')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   bulk(@CurrentUser() user: AuthUser, @Body() dto: BulkAssignShiftDto) {
     return this.shifts.bulkAssign(user.companyId, user.id, dto);
   }
@@ -78,13 +78,13 @@ export class ShiftsController {
   }
 
   @Get('shift-changes')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   listChanges(@CurrentUser() user: AuthUser, @Query('status') status?: ShiftChangeStatus) {
     return this.shifts.listChangeRequests(user.companyId, status);
   }
 
   @Post('shift-changes/:id/review')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   review(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

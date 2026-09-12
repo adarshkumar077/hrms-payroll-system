@@ -23,7 +23,11 @@ export class StorageService implements OnModuleInit {
   }
 
   async saveLocal(companyId: string, employeeId: string, fileName: string, buffer: Buffer) {
-    const key = `${companyId}/${employeeId}/${randomUUID()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    return this.save(companyId, employeeId, fileName, buffer);
+  }
+
+  async save(companyId: string, folder: string, fileName: string, buffer: Buffer) {
+    const key = `${companyId}/${folder}/${randomUUID()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     const full = path.join(this.rootDir, key);
     mkdirSync(path.dirname(full), { recursive: true });
     writeFileSync(full, buffer);
@@ -31,7 +35,7 @@ export class StorageService implements OnModuleInit {
   }
 
   openReadStream(storageKey: string) {
-    const full = path.join(this.rootDir, storageKey);
+    const full = this.safePath(storageKey);
     if (!existsSync(full)) {
       throw new Error('File not found on disk');
     }
@@ -39,11 +43,24 @@ export class StorageService implements OnModuleInit {
   }
 
   absolutePath(storageKey: string) {
-    return path.join(this.rootDir, storageKey);
+    return this.safePath(storageKey);
   }
 
   deleteLocal(storageKey: string) {
-    const full = path.join(this.rootDir, storageKey);
+    const full = this.safePath(storageKey);
     if (existsSync(full)) unlinkSync(full);
+  }
+
+  private safePath(storageKey: string) {
+    const normalized = storageKey.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (normalized.includes('..') || normalized.startsWith('/')) {
+      throw new Error('Invalid storage key');
+    }
+    const full = path.resolve(this.rootDir, normalized);
+    const root = path.resolve(this.rootDir);
+    if (!full.startsWith(root + path.sep) && full !== root) {
+      throw new Error('Invalid storage key');
+    }
+    return full;
   }
 }

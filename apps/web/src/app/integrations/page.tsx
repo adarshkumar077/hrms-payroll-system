@@ -38,7 +38,7 @@ export default function IntegrationsPage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => ['CEO', 'HR', 'ADMIN'].includes(r))) {
+    if (!u.roles.some((r) => ['SUPER_ADMIN', 'ADMIN'].includes(r))) {
       router.replace('/dashboard');
       return;
     }
@@ -48,11 +48,9 @@ export default function IntegrationsPage() {
   async function toggle(provider: string, isEnabled: boolean) {
     setError('');
     try {
-      await api(`/integrations/configs/${provider}`, {
-        method: 'PUT',
-        body: JSON.stringify({ isEnabled }),
-      });
-      setMsg(`${provider} ${isEnabled ? 'enabled' : 'disabled'}`);
+      const path = isEnabled ? `/integrations/connect/${provider}` : `/integrations/disconnect/${provider}`;
+      await api(path, { method: 'POST', body: '{}' });
+      setMsg(`${provider} ${isEnabled ? 'connected' : 'disconnected'}`);
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Update failed');
@@ -101,7 +99,7 @@ export default function IntegrationsPage() {
       </Link>
       <h1 className="font-display text-3xl text-brand-700 mt-2">Integrations</h1>
       <p className="text-sm text-ink/60 mb-6">
-        Email / SMS / WhatsApp / ESSL / Google Calendar / Accounting (gateway stubs)
+        Email, Outlook, WhatsApp, Slack, Teams, Drive, OneDrive, REST keys, and webhooks. Secrets are encrypted at rest.
       </p>
       {error && <p className="text-sm text-red-700 mb-2">{error}</p>}
       {msg && <p className="text-sm text-brand-700 mb-2">{msg}</p>}
@@ -121,7 +119,21 @@ export default function IntegrationsPage() {
               className="text-sm px-3 py-1.5 rounded border border-brand-300"
               onClick={() => toggle(c.provider, !c.isEnabled)}
             >
-              {c.isEnabled ? 'Disable' : 'Enable'}
+              {c.isEnabled ? 'Disconnect' : 'Connect'}
+            </button>
+            <button
+              type="button"
+              className="text-sm px-3 py-1.5 rounded border"
+              onClick={async () => {
+                try {
+                  const r = await api<{ status: string }>(`/integrations/test/${c.provider}`, { method: 'POST', body: '{}' });
+                  setMsg(`${c.provider} test: ${r.status}`);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : 'Test failed');
+                }
+              }}
+            >
+              Test
             </button>
           </div>
         ))}

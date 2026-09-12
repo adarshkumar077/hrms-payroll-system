@@ -40,11 +40,11 @@ export default function ReimbursementQueuePage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => ['CEO', 'HR'].includes(r))) {
+    if (!u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r))) {
       router.replace('/dashboard');
       return;
     }
-    setIsCeo(u.roles.includes('CEO'));
+    setIsCeo(u.roles.includes('SUPER_ADMIN'));
     load();
   }, [router]);
 

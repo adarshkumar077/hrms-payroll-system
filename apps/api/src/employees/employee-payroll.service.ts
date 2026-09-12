@@ -21,7 +21,7 @@ export class EmployeePayrollService {
   constructor(private readonly prisma: PrismaService) {}
 
   private isHrOrCeo(user: AuthUser) {
-    return user.roles.includes(RoleCode.CEO) || user.roles.includes(RoleCode.HR);
+    return user.roles.includes(RoleCode.SUPER_ADMIN) || user.roles.includes(RoleCode.HR);
   }
 
   private async assertEmployee(companyId: string, employeeId: string) {
@@ -71,7 +71,7 @@ export class EmployeePayrollService {
   }
 
   async getConfig(actor: AuthUser, employeeId: string) {
-    const privileged = this.isHrOrCeo(actor) || actor.roles.includes(RoleCode.FINANCE);
+    const privileged = this.isHrOrCeo(actor) || actor.roles.includes(RoleCode.ADMIN);
     if (!privileged && actor.employeeId !== employeeId) {
       throw new ForbiddenException();
     }
@@ -133,7 +133,7 @@ export class EmployeePayrollService {
   }
 
   async payrollHistory(actor: AuthUser, employeeId: string) {
-    const privileged = this.isHrOrCeo(actor) || actor.roles.includes(RoleCode.FINANCE);
+    const privileged = this.isHrOrCeo(actor) || actor.roles.includes(RoleCode.ADMIN);
     if (!privileged && actor.employeeId !== employeeId) throw new ForbiddenException();
     await this.assertEmployee(actor.companyId, employeeId);
 
@@ -183,7 +183,7 @@ export class EmployeePayrollService {
   }
 
   async salaryTracker(actor: AuthUser, employeeId: string, year?: number, month?: number) {
-    const privileged = this.isHrOrCeo(actor) || actor.roles.includes(RoleCode.FINANCE);
+    const privileged = this.isHrOrCeo(actor) || actor.roles.includes(RoleCode.ADMIN);
     if (!privileged && actor.employeeId !== employeeId) throw new ForbiddenException();
     await this.assertEmployee(actor.companyId, employeeId);
 

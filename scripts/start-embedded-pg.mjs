@@ -5,14 +5,14 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
-const databaseDir = path.join(root, 'data', 'pg');
+const databaseDir = path.join(root, 'data', 'pg-hrms');
 const marker = path.join(databaseDir, 'PG_VERSION');
 
 const pg = new EmbeddedPostgres({
   databaseDir,
   user: 'eitf',
   password: 'eitf_dev_password',
-  port: 5433,
+  port: 5435,
   persistent: true,
 });
 
@@ -22,7 +22,7 @@ async function main() {
     await pg.initialise();
   }
 
-  console.log('Starting embedded Postgres on port 5433…');
+  console.log('Starting embedded Postgres on port 5435…');
   await pg.start();
 
   try {
@@ -31,7 +31,6 @@ async function main() {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (!/already exists/i.test(msg)) {
-      // createDatabase may throw if exists — ignore that case
       console.log(`createDatabase note: ${msg}`);
     } else {
       console.log('Database eitf_hrms already exists');
@@ -39,7 +38,7 @@ async function main() {
   }
 
   console.log('Embedded Postgres is running.');
-  console.log('DATABASE_URL=postgresql://eitf:eitf_dev_password@localhost:5433/eitf_hrms?schema=public');
+  console.log('DATABASE_URL=postgresql://eitf:eitf_dev_password@localhost:5435/eitf_hrms?schema=public');
   console.log('Keep this process open while developing. Ctrl+C to stop.');
 
   const keepAlive = () => {};

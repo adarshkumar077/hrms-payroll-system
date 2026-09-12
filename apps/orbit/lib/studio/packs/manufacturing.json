@@ -1,0 +1,26 @@
+{
+  "key": "manufacturing",
+  "name": "Manufacturing",
+  "industry": "Manufacturing / Industrial Equipment",
+  "description": "Shop-floor and field-service tracking for manufacturers — machine specs on the lead, and installation/maintenance jobs tied to a serial-numbered machine.",
+  "modules": [
+    { "module": "tickets", "labelSingular": "Job", "labelPlural": "Jobs" }
+  ],
+  "picklists": [
+    {
+      "key": "ticket_type",
+      "label": "Ticket Type",
+      "options": [
+        { "value": "Installation" },
+        { "value": "Preventive Maintenance" },
+        { "value": "Breakdown" },
+        { "value": "Spares" }
+      ]
+    }
+  ],
+  "fields": [
+    { "module": "leads", "label": "Machine Type", "type": "text" },
+    { "module": "leads", "label": "Annual Capacity", "type": "text" },
+    { "module": "tickets", "label": "Machine Serial No", "type": "text" }
+  ]
+}

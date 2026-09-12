@@ -36,7 +36,7 @@ export class ReportsController {
   }
 
   @Get('reports/attendance')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   attendance(
     @CurrentUser() user: AuthUser,
     @Query('year') year?: string,
@@ -46,13 +46,13 @@ export class ReportsController {
   }
 
   @Get('reports/leave')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   leave(@CurrentUser() user: AuthUser, @Query('year') year?: string) {
     return this.reports.leave(user.companyId, year ? Number(year) : undefined);
   }
 
   @Get('reports/payroll')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   payroll(
     @CurrentUser() user: AuthUser,
     @Query('year') year?: string,
@@ -62,25 +62,25 @@ export class ReportsController {
   }
 
   @Get('reports/employee')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   employee(@CurrentUser() user: AuthUser) {
     return this.reports.employee(user.companyId);
   }
 
   @Get('reports/department')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   department(@CurrentUser() user: AuthUser) {
     return this.reports.department(user.companyId);
   }
 
   @Get('reports/cost')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   cost(@CurrentUser() user: AuthUser) {
     return this.reports.cost(user.companyId);
   }
 
   @Get('reports/compliance')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   compliance(
     @CurrentUser() user: AuthUser,
     @Query('year') year?: string,
@@ -90,13 +90,13 @@ export class ReportsController {
   }
 
   @Get('reports/audit')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   audit(@CurrentUser() user: AuthUser, @Query('limit') limit?: string) {
     return this.reports.audit(user.companyId, limit ? Number(limit) : 200);
   }
 
   @Get('balance-sheets/:kind')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   balance(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
@@ -107,7 +107,7 @@ export class ReportsController {
   }
 
   @Get('reports/:kind/export/excel')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   async reportExcel(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
@@ -120,7 +120,7 @@ export class ReportsController {
 
   @Get('reports/:kind/export/pdf')
   @Header('Content-Type', 'text/html; charset=utf-8')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   async reportPdf(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
@@ -132,7 +132,7 @@ export class ReportsController {
   }
 
   @Get('reports/:kind/export/csv')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN)
   async reportCsv(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
@@ -144,7 +144,7 @@ export class ReportsController {
   }
 
   @Post('reports/:kind/export/email')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   async reportEmail(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
@@ -162,7 +162,7 @@ export class ReportsController {
   }
 
   @Get('balance-sheets/:kind/export/excel')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   async balExcel(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
@@ -175,7 +175,7 @@ export class ReportsController {
 
   @Get('balance-sheets/:kind/export/pdf')
   @Header('Content-Type', 'text/html; charset=utf-8')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   async balPdf(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
@@ -187,7 +187,7 @@ export class ReportsController {
   }
 
   @Get('balance-sheets/:kind/export/csv')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   async balCsv(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
@@ -199,7 +199,7 @@ export class ReportsController {
   }
 
   @Post('balance-sheets/:kind/export/email')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   async balEmail(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,

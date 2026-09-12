@@ -9,6 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { Request, Response } from 'express';
 import { randomUUID } from 'crypto';
+import { sanitizeForLog, sanitizeLogMessage } from '../sanitize-log.util';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -65,17 +66,21 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     const stack = exception instanceof Error ? exception.stack : String(exception);
-    this.logger.error(
-      JSON.stringify({
-        requestId,
-        userId,
-        path,
-        method: req.method,
-        status,
-        message: exception instanceof Error ? exception.message : exception,
-        stack,
-      }),
-    );
+    const logPayload = sanitizeForLog({
+      requestId,
+      userId,
+      path,
+      method: req.method,
+      status,
+      message: exception instanceof Error ? sanitizeLogMessage(exception.message) : exception,
+    }) as Record<string, unknown>;
+    if (status === HttpStatus.UNAUTHORIZED || status === HttpStatus.FORBIDDEN) {
+      this.logger.warn(JSON.stringify(logPayload));
+    } else if (status >= 500) {
+      this.logger.error(JSON.stringify({ ...logPayload, stack }));
+    } else {
+      this.logger.warn(JSON.stringify(logPayload));
+    }
 
     res.status(status).json({
       statusCode: status,

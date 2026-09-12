@@ -8,6 +8,7 @@ import { Public } from '../auth/decorators/public.decorator';
 import {
   BiometricWebhookDto,
   CorrectAttendanceDto,
+  ManualMarkDto,
   MarkAttendanceDto,
 } from './dto/attendance.dto';
 
@@ -35,8 +36,21 @@ export class AttendanceController {
     );
   }
 
+  @Get('me/attendance/calendar')
+  myCalendar(
+    @CurrentUser() user: AuthUser,
+    @Query('year') year?: string,
+    @Query('month') month?: string,
+  ) {
+    return this.attendance.myCalendar(
+      user,
+      year ? Number(year) : undefined,
+      month ? Number(month) : undefined,
+    );
+  }
+
   @Get('attendance/console')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.ADMIN)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   console(@CurrentUser() user: AuthUser, @Query('date') date: string) {
     return this.attendance.console(
       user.companyId,
@@ -45,7 +59,7 @@ export class AttendanceController {
   }
 
   @Get('attendance/monthly')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.ADMIN, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   monthly(
     @CurrentUser() user: AuthUser,
     @Query('year') year: string,
@@ -59,8 +73,56 @@ export class AttendanceController {
     );
   }
 
+  /** Excel-style sheet for one employee (or all if HR omits employeeId) */
+  @Get('attendance/sheet')
+  sheet(
+    @CurrentUser() user: AuthUser,
+    @Query('employeeId') employeeId?: string,
+    @Query('year') year?: string,
+    @Query('month') month?: string,
+  ) {
+    const now = new Date();
+    return this.attendance.attendanceSheet(user, {
+      employeeId: employeeId || undefined,
+      year: year ? Number(year) : now.getFullYear(),
+      month: month ? Number(month) : now.getMonth() + 1,
+    });
+  }
+
+  @Get('attendance/records/:employeeId/:date')
+  recordDetail(
+    @CurrentUser() user: AuthUser,
+    @Param('employeeId') employeeId: string,
+    @Param('date') date: string,
+  ) {
+    return this.attendance.recordDetail(user, employeeId, date);
+  }
+
+  @Post('attendance/system-logout/run')
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
+  runSystemLogout() {
+    return this.attendance.applySystemLogouts(new Date());
+  }
+
+  @Get('attendance/audit')
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
+  audit(
+    @CurrentUser() user: AuthUser,
+    @Query('employeeId') employeeId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.attendance.auditLogs(user, { employeeId, from, to });
+  }
+
+  @Post('attendance/manual')
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
+  manualMark(@CurrentUser() user: AuthUser, @Body() dto: ManualMarkDto) {
+    return this.attendance.manualMark(user, dto);
+  }
+
   @Put('attendance/:employeeId/:date')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   correct(
     @CurrentUser() user: AuthUser,
     @Param('employeeId') employeeId: string,
@@ -71,19 +133,19 @@ export class AttendanceController {
   }
 
   @Get('attendance/counters')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   counters(@CurrentUser() user: AuthUser) {
     return this.attendance.counters(user.companyId);
   }
 
   @Get('attendance/biometric-devices')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.ADMIN)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   devices(@CurrentUser() user: AuthUser) {
     return this.attendance.biometricDevices(user.companyId);
   }
 
   @Get('attendance/team')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.MANAGER)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   team(@CurrentUser() user: AuthUser, @Query('date') date: string) {
     return this.attendance.teamAttendance(
       user,

@@ -62,7 +62,7 @@ export default function AssetsPage() {
       return;
     }
 
-    const hrAccess = u.roles.some((r) => ['CEO', 'HR', 'FINANCE'].includes(r));
+    const hrAccess = u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r));
     setIsHr(hrAccess);
 
     if (hrAccess) {

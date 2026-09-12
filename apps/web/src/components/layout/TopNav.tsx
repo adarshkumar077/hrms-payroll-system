@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SessionUser, clearSession, api } from '@/lib/api';
 import { getAllSearchableRoutes } from '@/lib/navigation';
-import { isAdmin, isCeo, ViewMode, getPersonaLabel } from '@/lib/roles';
+import { isAdmin, ViewMode, getPersonaLabel } from '@/lib/roles';
 import { applyTheme, readStoredTheme, saveTheme, ThemeMode } from '@/lib/theme';
 import { BellIcon, ChevronIcon, LogoutIcon, MenuIcon, MoonIcon, SearchIcon, SunIcon } from '@/components/ui/Icons';
 
@@ -137,8 +137,8 @@ export function TopNav({
       </div>
 
       <div className="flex items-center gap-2">
-        {isAdmin(user) && !isCeo(user) && (
-          <div className="hidden md:flex items-center rounded-xl border border-ink-200 dark:border-ink-700 overflow-hidden mr-1">
+        {isAdmin(user) && (
+          <div className="flex items-center rounded-xl border border-ink-200 dark:border-ink-700 overflow-hidden mr-1">
             <button
               type="button"
               onClick={() => onViewModeChange('admin')}

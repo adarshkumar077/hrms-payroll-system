@@ -13,7 +13,11 @@ export default function Error({
       <p className="text-sm text-ink-500 max-w-md">
         {error.message || 'An unexpected error occurred while loading this page.'}
       </p>
-      <button type="button" className="btn-primary" onClick={() => reset()}>
+      <button
+        type="button"
+        className="bg-brand-600 text-white px-4 py-2 rounded"
+        onClick={() => reset()}
+      >
         Try again
       </button>
     </div>

@@ -25,25 +25,25 @@ export class DocumentsController {
   constructor(private readonly documents: DocumentsService) {}
 
   @Get('document-types')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.ADMIN)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   listTypes(@CurrentUser() user: AuthUser) {
     return this.documents.listTypes(user.companyId);
   }
 
   @Post('document-types/seed')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   seedTypes(@CurrentUser() user: AuthUser) {
     return this.documents.ensureDefaultTypes(user.companyId);
   }
 
   @Get('employees/:employeeId/documents')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.ADMIN)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   listForEmployee(@CurrentUser() user: AuthUser, @Param('employeeId') employeeId: string) {
     return this.documents.listForEmployee(user, employeeId);
   }
 
   @Post('employees/:employeeId/documents')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -110,7 +110,7 @@ export class DocumentsController {
   }
 
   @Post('documents/:id/replace')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -128,7 +128,7 @@ export class DocumentsController {
   }
 
   @Delete('documents/:id')
-  @Roles(RoleCode.CEO, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.documents.softDelete(user, id);
   }

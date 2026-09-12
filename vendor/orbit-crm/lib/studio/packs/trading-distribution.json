@@ -1,0 +1,27 @@
+{
+  "key": "trading-distribution",
+  "name": "Trading & Distribution",
+  "industry": "Trading / Wholesale Distribution",
+  "description": "Order-volume driven pipeline for traders and distributors — track product interest, negotiated credit terms, and delivery logistics from lead to order.",
+  "modules": [
+    { "module": "opportunities", "labelSingular": "Order", "labelPlural": "Orders" }
+  ],
+  "picklists": [
+    {
+      "key": "credit_terms",
+      "label": "Credit Terms",
+      "options": [
+        { "value": "Advance" },
+        { "value": "15 Days" },
+        { "value": "30 Days" },
+        { "value": "45 Days" }
+      ]
+    }
+  ],
+  "fields": [
+    { "module": "leads", "label": "Product Interest", "type": "text" },
+    { "module": "leads", "label": "Order Volume", "type": "number" },
+    { "module": "leads", "label": "Credit Terms", "type": "picklist", "picklistKey": "credit_terms" },
+    { "module": "accounts", "label": "Transport Route", "type": "text" }
+  ]
+}

@@ -1,0 +1,31 @@
+# deps & build artifacts (rebuilt inside the image)
+node_modules
+.next
+out
+build
+
+# git / editor / OS
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# local databases & journals
+*.db
+*.db-journal
+data
+
+# env / secrets (never bake into the image)
+.env
+.env.local
+.env*.local
+.env.production
+
+# docs & misc that don't belong in the build context
+Dockerfile
+.dockerignore
+docker-compose.yml
+DEPLOY.md
+*.log
+npm-debug.log*

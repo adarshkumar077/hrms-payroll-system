@@ -71,17 +71,17 @@ export default function AnalyticsPage() {
     api<EmpDash>('/dashboard/employee')
       .then(setEmp)
       .catch(() => undefined);
-    if (u.roles.some((r) => ['CEO', 'HR'].includes(r))) {
+    if (u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r))) {
       api<HrDash>('/dashboard/hr')
         .then(setHr)
         .catch((e) => setError(e instanceof Error ? e.message : 'HR dash failed'));
     }
-    if (u.roles.some((r) => ['CEO', 'HR', 'FINANCE'].includes(r))) {
+    if (u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r))) {
       api<CeoDash>('/dashboard/ceo')
         .then(setCeo)
         .catch((e) => setError(e instanceof Error ? e.message : 'Super Admin dash failed'));
     }
-    if (u.roles.some((r) => ['CEO', 'HR'].includes(r))) {
+    if (u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r))) {
       api<NonNullable<typeof pred>>('/ai/predictions')
         .then(setPred)
         .catch(() => undefined);
@@ -97,7 +97,7 @@ export default function AnalyticsPage() {
     }
   }
 
-  const isHrOrCeo = roles.some((r) => ['CEO', 'HR'].includes(r));
+  const isHrOrCeo = roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r));
 
   return (
     <main className="max-w-4xl mx-auto px-4 py-10">

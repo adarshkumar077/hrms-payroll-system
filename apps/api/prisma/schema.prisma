@@ -8,13 +8,10 @@ datasource db {
 }
 
 enum RoleCode {
-  CEO
-  HR
-  MANAGER
-  EMPLOYEE
-  EMPLOYEE_ADMIN
-  FINANCE
+  SUPER_ADMIN
   ADMIN
+  HR
+  EMPLOYEE
 }
 
 enum UserStatus {
@@ -97,6 +94,26 @@ model Company {
   integrationEventLogs  IntegrationEventLog[]
   aiChatMessages        AiChatMessage[]
   resumeScreenings      ResumeScreening[]
+  organizationSettings  OrganizationSettings?
+  aiConversations       AiConversation[]
+  aiPrompts             AiPrompt[]
+  aiLogs                AiLog[]
+  aiUsageDaily          AiUsage[]
+  integrationApiKeys    IntegrationApiKey[]
+  libraryDocuments      LibraryDocument[]
+  importJobs            ImportJob[]
+  exportJobs            ExportJob[]
+  rolePermissions       RolePermission[]
+  loginLogs             LoginLog[]
+  userDevices           UserDevice[]
+  crmCustomers          CrmCustomer[]
+  crmLeads              CrmLead[]
+  crmDeals              CrmDeal[]
+  crmFollowUps          CrmFollowUp[]
+  crmNotes              CrmNote[]
+  crmTasks              CrmTask[]
+  crmActivityLogs       CrmActivityLog[]
+  loginSessions         LoginSession[]
 
   @@map("companies")
 }
@@ -180,6 +197,10 @@ model User {
   refreshTokens RefreshToken[]
   otpChallenges OtpChallenge[]
   moduleAccess  UserModuleAccess[]
+  loginSessions LoginSession[]
+  aiConversations AiConversation[]
+  userDevices   UserDevice[]
+  loginLogs     LoginLog[]
 
   @@unique([companyId, loginId])
   @@unique([companyId, email])
@@ -369,6 +390,15 @@ model Employee {
   ticketsAssigned   Ticket[] @relation("TicketAssignee")
   ticketComments    TicketComment[]
   notifications     Notification[]
+  crmLeadsOwned     CrmLead[] @relation("CrmLeadOwner")
+  crmDealsOwned     CrmDeal[] @relation("CrmDealOwner")
+  crmCustomersOwned CrmCustomer[] @relation("CrmCustomerOwner")
+  crmFollowUpsOwned CrmFollowUp[] @relation("CrmFollowUpOwner")
+  crmNotesAuthored  CrmNote[] @relation("CrmNoteAuthor")
+  crmTasksAssigned  CrmTask[] @relation("CrmTaskAssignee")
+  crmTasksCreated   CrmTask[] @relation("CrmTaskAssigner")
+  crmTaskComments   CrmTaskComment[]
+  crmActivities     CrmActivityLog[]
 
   @@unique([companyId, employeeCode])
   @@index([companyId, isActive])
@@ -696,13 +726,28 @@ model AttendanceRecord {
   checkInAt       DateTime?           @map("check_in_at")
   checkOutAt      DateTime?           @map("check_out_at")
   workMinutes     Int?                @map("work_minutes")
+  overtimeMinutes Int                 @default(0) @map("overtime_minutes")
+  todaysEarnings  Float?              @map("todays_earnings")
   isLate          Boolean             @default(false) @map("is_late")
   lateMinutes     Int                 @default(0) @map("late_minutes")
-  method          AttendanceMethod?   
+  method          AttendanceMethod?
   sourceNote      String?             @map("source_note")
+  /// Legacy single-point fields (kept for compatibility; prefer check-in/out specific)
   latitude        Float?
   longitude       Float?
   selfieUrl       String?             @map("selfie_url")
+  checkInLatitude   Float?            @map("check_in_latitude")
+  checkInLongitude  Float?            @map("check_in_longitude")
+  checkInAddress    String?           @map("check_in_address") @db.Text
+  checkInSelfieUrl  String?           @map("check_in_selfie_url") @db.Text
+  checkInMapsUrl    String?           @map("check_in_maps_url")
+  checkOutLatitude  Float?            @map("check_out_latitude")
+  checkOutLongitude Float?            @map("check_out_longitude")
+  checkOutAddress   String?           @map("check_out_address") @db.Text
+  checkOutSelfieUrl String?           @map("check_out_selfie_url") @db.Text
+  checkOutMapsUrl   String?           @map("check_out_maps_url")
+  /// MANUAL_OUT | SYSTEM_LOGOUT | HR_MANUAL
+  checkOutSource    String?           @map("check_out_source")
   correctedBy     String?             @map("corrected_by")
   correctionNote  String?             @map("correction_note")
   createdAt       DateTime            @default(now()) @map("created_at")
@@ -711,6 +756,7 @@ model AttendanceRecord {
   company  Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
   employee Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   punches  AttendancePunch[]
+  auditLogs AttendanceAuditLog[]
 
   @@unique([employeeId, date])
   @@index([companyId, date])
@@ -729,8 +775,10 @@ model AttendancePunch {
   latitude     Float?
   longitude    Float?
   accuracyM    Float?           @map("accuracy_m")
+  address      String?          @db.Text
+  mapsUrl      String?          @map("maps_url")
   qrPayload    String?          @map("qr_payload")
-  selfieUrl    String?          @map("selfie_url")
+  selfieUrl    String?          @map("selfie_url") @db.Text
   deviceInfo   String?          @map("device_info")
   createdAt    DateTime         @default(now()) @map("created_at")
 
@@ -740,6 +788,26 @@ model AttendancePunch {
   @@index([employeeId, punchedAt])
   @@index([companyId, punchedAt])
   @@map("attendance_punches")
+}
+
+/// Full audit trail for attendance creates/edits/corrections
+model AttendanceAuditLog {
+  id         String   @id @default(cuid())
+  companyId  String   @map("company_id")
+  recordId   String?  @map("record_id")
+  employeeId String   @map("employee_id")
+  actorId    String?  @map("actor_id")
+  action     String
+  beforeJson String?  @map("before_json") @db.Text
+  afterJson  String?  @map("after_json") @db.Text
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  record AttendanceRecord? @relation(fields: [recordId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, employeeId, createdAt])
+  @@index([recordId])
+  @@map("attendance_audit_logs")
 }
 
 model EmployeeAttendanceCounter {
@@ -1974,6 +2042,14 @@ enum IntegrationProvider {
   BIOMETRIC_ESSL
   GOOGLE_CALENDAR
   ACCOUNTING
+  GMAIL
+  OUTLOOK
+  SLACK
+  TEAMS
+  GOOGLE_DRIVE
+  ONEDRIVE
+  REST_API
+  WEBHOOK
 }
 
 model IntegrationConfig {
@@ -2038,5 +2114,528 @@ model ResumeScreening {
 
   @@index([companyId, createdAt])
   @@map("resume_screenings")
+}
+
+enum CrmLeadStatus {
+  NEW
+  CONTACTED
+  FOLLOW_UP
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum CrmTaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum CrmTaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  VERIFIED
+  REOPENED
+}
+
+enum CrmDealStage {
+  PROSPECTING
+  QUALIFICATION
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum CrmFollowUpType {
+  CALL
+  EMAIL
+  MEETING
+  TASK
+  OTHER
+}
+
+model CrmCustomer {
+  id              String   @id @default(cuid())
+  companyId       String   @map("company_id")
+  name            String
+  email           String?
+  phone           String?
+  companyName     String?  @map("company_name")
+  address         String?
+  ownerEmployeeId String?  @map("owner_employee_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  owner   Employee? @relation("CrmCustomerOwner", fields: [ownerEmployeeId], references: [id], onDelete: SetNull)
+  leads   CrmLead[]
+  deals   CrmDeal[]
+  followUps CrmFollowUp[]
+  notes   CrmNote[]
+
+  @@index([companyId, ownerEmployeeId])
+  @@map("crm_customers")
+}
+
+model CrmLead {
+  id              String        @id @default(cuid())
+  companyId       String        @map("company_id")
+  title           String
+  source          String?
+  status          CrmLeadStatus @default(NEW)
+  priority        CrmTaskPriority @default(MEDIUM)
+  expectedValue   Float?        @map("expected_value")
+  ownerEmployeeId String?       @map("owner_employee_id")
+  customerId      String?       @map("customer_id")
+  contactName     String?       @map("contact_name")
+  contactEmail    String?       @map("contact_email")
+  contactPhone    String?       @map("contact_phone")
+  whatsapp        String?
+  followUpAt      DateTime?     @map("follow_up_at")
+  nextAction      String?       @map("next_action")
+  description     String?
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  company  Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  owner    Employee?    @relation("CrmLeadOwner", fields: [ownerEmployeeId], references: [id], onDelete: SetNull)
+  customer CrmCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  deals    CrmDeal[]
+  followUps CrmFollowUp[]
+  notes    CrmNote[]
+  tasks    CrmTask[]
+  activities CrmActivityLog[]
+
+  @@index([companyId, status])
+  @@index([companyId, ownerEmployeeId])
+  @@index([companyId, followUpAt])
+  @@map("crm_leads")
+}
+
+model CrmDeal {
+  id                String       @id @default(cuid())
+  companyId         String       @map("company_id")
+  title             String
+  stage             CrmDealStage @default(PROSPECTING)
+  amount            Float        @default(0)
+  ownerEmployeeId   String?      @map("owner_employee_id")
+  customerId        String?      @map("customer_id")
+  leadId            String?      @map("lead_id")
+  expectedCloseDate DateTime?    @map("expected_close_date") @db.Date
+  closedAt          DateTime?    @map("closed_at")
+  description       String?
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  company  Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  owner    Employee?    @relation("CrmDealOwner", fields: [ownerEmployeeId], references: [id], onDelete: SetNull)
+  customer CrmCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  lead     CrmLead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  followUps CrmFollowUp[]
+  notes    CrmNote[]
+
+  @@index([companyId, stage])
+  @@index([companyId, ownerEmployeeId])
+  @@map("crm_deals")
+}
+
+model CrmFollowUp {
+  id              String          @id @default(cuid())
+  companyId       String          @map("company_id")
+  title           String
+  type            CrmFollowUpType @default(CALL)
+  dueAt           DateTime        @map("due_at")
+  completedAt     DateTime?       @map("completed_at")
+  ownerEmployeeId String          @map("owner_employee_id")
+  leadId          String?         @map("lead_id")
+  dealId          String?         @map("deal_id")
+  customerId      String?         @map("customer_id")
+  notes           String?
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  company  Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  owner    Employee     @relation("CrmFollowUpOwner", fields: [ownerEmployeeId], references: [id], onDelete: Cascade)
+  lead     CrmLead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  deal     CrmDeal?     @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  customer CrmCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, dueAt])
+  @@index([companyId, ownerEmployeeId])
+  @@map("crm_follow_ups")
+}
+
+model CrmNote {
+  id               String   @id @default(cuid())
+  companyId        String   @map("company_id")
+  content          String   @db.Text
+  authorEmployeeId String?  @map("author_employee_id")
+  leadId           String?  @map("lead_id")
+  dealId           String?  @map("deal_id")
+  customerId       String?  @map("customer_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  company Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  author  Employee?    @relation("CrmNoteAuthor", fields: [authorEmployeeId], references: [id], onDelete: SetNull)
+  lead    CrmLead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  deal    CrmDeal?     @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  customer CrmCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@map("crm_notes")
+}
+
+model CrmTask {
+  id                   String          @id @default(cuid())
+  companyId            String          @map("company_id")
+  title                String
+  description          String?
+  priority             CrmTaskPriority @default(MEDIUM)
+  status               CrmTaskStatus   @default(PENDING)
+  dueAt                DateTime?       @map("due_at")
+  assignedByEmployeeId String?         @map("assigned_by_employee_id")
+  assignedToEmployeeId String          @map("assigned_to_employee_id")
+  leadId               String?         @map("lead_id")
+  attachmentUrls       Json?           @map("attachment_urls")
+  verifiedAt           DateTime?       @map("verified_at")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+
+  company    Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assignedBy Employee?        @relation("CrmTaskAssigner", fields: [assignedByEmployeeId], references: [id], onDelete: SetNull)
+  assignedTo Employee         @relation("CrmTaskAssignee", fields: [assignedToEmployeeId], references: [id], onDelete: Cascade)
+  lead       CrmLead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  comments   CrmTaskComment[]
+
+  @@index([companyId, status])
+  @@index([companyId, assignedToEmployeeId])
+  @@map("crm_tasks")
+}
+
+model CrmTaskComment {
+  id               String   @id @default(cuid())
+  taskId           String   @map("task_id")
+  authorEmployeeId String?  @map("author_employee_id")
+  content          String   @db.Text
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  task   CrmTask   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author Employee? @relation(fields: [authorEmployeeId], references: [id], onDelete: SetNull)
+
+  @@index([taskId, createdAt])
+  @@map("crm_task_comments")
+}
+
+model CrmActivityLog {
+  id               String   @id @default(cuid())
+  companyId        String   @map("company_id")
+  leadId           String?  @map("lead_id")
+  actorEmployeeId  String?  @map("actor_employee_id")
+  action           String
+  detail           String?
+  meta             Json?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lead    CrmLead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  actor   Employee? @relation(fields: [actorEmployeeId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, leadId, createdAt])
+  @@map("crm_activity_logs")
+}
+
+model LoginSession {
+  id         String    @id @default(cuid())
+  companyId  String    @map("company_id")
+  userId     String    @map("user_id")
+  loginAt    DateTime  @default(now()) @map("login_at")
+  logoutAt   DateTime? @map("logout_at")
+  ipAddress  String?   @map("ip_address")
+  userAgent  String?   @map("user_agent")
+  device     String?
+  browser    String?
+  isOnline   Boolean   @default(true) @map("is_online")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, loginAt])
+  @@index([companyId, userId])
+  @@index([companyId, isOnline])
+  @@map("login_sessions")
+}
+
+// ---- Intelligence & Enterprise Setup ----
+
+model OrganizationSettings {
+  id               String   @id @default(cuid())
+  companyId        String   @unique @map("company_id")
+  displayName      String   @default("Enhance IT Infrastructure (EITF)") @map("display_name")
+  legalName        String?  @map("legal_name")
+  address          String?
+  phone            String?
+  email            String?
+  website          String?
+  gst              String?
+  pan              String?
+  logoUrl          String?  @map("logo_url")
+  faviconUrl       String?  @map("favicon_url")
+  loginLogoUrl     String?  @map("login_logo_url")
+  emailLogoUrl     String?  @map("email_logo_url")
+  primaryColor     String   @default("#1d4ed8") @map("primary_color")
+  secondaryColor   String   @default("#4f46e5") @map("secondary_color")
+  accentColor      String   @default("#0ea5e9") @map("accent_color")
+  darkModeEnabled  Boolean  @default(true) @map("dark_mode_enabled")
+  dashboardWidgets Json     @default("{}") @map("dashboard_widgets")
+  sidebarConfig    Json     @default("{}") @map("sidebar_config")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("organization_settings")
+}
+
+model AiConversation {
+  id        String   @id @default(cuid())
+  companyId String   @map("company_id")
+  userId    String   @map("user_id")
+  title     String   @default("New conversation")
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company  Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages AiMessage[]
+
+  @@index([companyId, userId, updatedAt])
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id             String   @id @default(cuid())
+  conversationId String   @map("conversation_id")
+  role           String
+  content        String   @db.Text
+  meta           Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("ai_messages")
+}
+
+model AiPrompt {
+  id          String   @id @default(cuid())
+  companyId   String   @map("company_id")
+  category    String
+  title       String
+  body        String   @db.Text
+  isSystem    Boolean  @default(false) @map("is_system")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdBy   String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, category])
+  @@map("ai_prompts")
+}
+
+model AiLog {
+  id             String   @id @default(cuid())
+  companyId      String   @map("company_id")
+  userId         String?  @map("user_id")
+  conversationId String?  @map("conversation_id")
+  model          String?
+  latencyMs      Int      @default(0) @map("latency_ms")
+  promptTokens   Int      @default(0) @map("prompt_tokens")
+  completionTokens Int    @default(0) @map("completion_tokens")
+  status         String   @default("OK")
+  errorMessage   String?  @map("error_message")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@map("ai_logs")
+}
+
+model AiUsage {
+  id               String   @id @default(cuid())
+  companyId        String   @map("company_id")
+  day              DateTime @db.Date
+  requests         Int      @default(0)
+  promptTokens     Int      @default(0) @map("prompt_tokens")
+  completionTokens Int      @default(0) @map("completion_tokens")
+  errorCount       Int      @default(0) @map("error_count")
+  avgLatencyMs     Int      @default(0) @map("avg_latency_ms")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, day])
+  @@map("ai_usage")
+}
+
+model IntegrationApiKey {
+  id           String    @id @default(cuid())
+  companyId    String    @map("company_id")
+  name         String
+  keyPrefix    String    @map("key_prefix")
+  secretHash   String    @map("secret_hash")
+  encryptedSecret String @map("encrypted_secret") @db.Text
+  lastUsedAt   DateTime? @map("last_used_at")
+  revokedAt    DateTime? @map("revoked_at")
+  createdBy    String?   @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@map("api_keys")
+}
+
+model LibraryDocument {
+  id          String    @id @default(cuid())
+  companyId   String    @map("company_id")
+  folder      String    @default("COMPANY")
+  category    String    @default("GENERAL")
+  title       String
+  fileName    String    @map("file_name")
+  mimeType    String    @map("mime_type")
+  sizeBytes   Int       @map("size_bytes")
+  storageKey  String    @map("storage_key")
+  employeeId  String?   @map("employee_id")
+  department  String?
+  expiresAt   DateTime? @map("expires_at")
+  uploadedBy  String?   @map("uploaded_by")
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  company  Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  versions LibraryDocumentVersion[]
+
+  @@index([companyId, folder, category])
+  @@index([companyId, employeeId])
+  @@map("documents")
+}
+
+model LibraryDocumentVersion {
+  id         String   @id @default(cuid())
+  documentId String   @map("document_id")
+  version    Int
+  fileName   String   @map("file_name")
+  mimeType   String   @map("mime_type")
+  sizeBytes  Int      @map("size_bytes")
+  storageKey String   @map("storage_key")
+  createdBy  String?  @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  document LibraryDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version])
+  @@map("document_versions")
+}
+
+model ImportJob {
+  id           String    @id @default(cuid())
+  companyId    String    @map("company_id")
+  entity       String
+  fileName     String    @map("file_name")
+  status       String    @default("PENDING")
+  dryRun       Boolean   @default(false) @map("dry_run")
+  totalRows    Int       @default(0) @map("total_rows")
+  successRows  Int       @default(0) @map("success_rows")
+  errorRows    Int       @default(0) @map("error_rows")
+  mappingJson  Json      @default("{}") @map("mapping_json")
+  errorReport  Json?
+  createdBy    String?   @map("created_by")
+  startedAt    DateTime? @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@map("import_jobs")
+}
+
+model ExportJob {
+  id          String    @id @default(cuid())
+  companyId   String    @map("company_id")
+  entity      String
+  format      String    @default("CSV")
+  status      String    @default("PENDING")
+  filtersJson Json      @default("{}") @map("filters_json")
+  fileName    String?   @map("file_name")
+  storageKey  String?   @map("storage_key")
+  createdBy   String?   @map("created_by")
+  finishedAt  DateTime? @map("finished_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@map("export_jobs")
+}
+
+model RolePermission {
+  id        String   @id @default(cuid())
+  companyId String   @map("company_id")
+  roleCode  RoleCode @map("role_code")
+  moduleKey String   @map("module_key")
+  access    String   @default("NONE")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, roleCode, moduleKey])
+  @@map("role_permissions")
+}
+
+model LoginLog {
+  id        String   @id @default(cuid())
+  companyId String   @map("company_id")
+  userId    String?  @map("user_id")
+  event     String
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@map("login_logs")
+}
+
+model UserDevice {
+  id         String    @id @default(cuid())
+  companyId  String    @map("company_id")
+  userId     String    @map("user_id")
+  device     String?
+  browser    String?
+  ipAddress  String?   @map("ip_address")
+  userAgent  String?   @map("user_agent")
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, userId])
+  @@map("user_devices")
 }
 

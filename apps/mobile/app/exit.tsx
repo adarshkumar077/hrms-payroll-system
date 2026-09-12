@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, TextInput, Alert, ScrollView } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+import { API_URL } from '../lib/api';
 
 export default function ExitMobile() {
   const { token } = useLocalSearchParams<{ token: string }>();

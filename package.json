@@ -5,19 +5,37 @@
   "description": "Enterprise HRMS & Payroll Platform — EITF Enhancing IT Infrastructure Pvt. Ltd.",
   "workspaces": [
     "apps/api",
-    "apps/web"
+    "apps/web",
+    "apps/orbit"
   ],
   "scripts": {
     "dev:api": "npm run start:dev -w @eitf/api",
     "dev:web": "npm run dev -w @eitf/web",
+    "dev:orbit": "npm run dev -w @eitf/orbit",
     "dev:mobile": "npm run start -w @eitf/mobile",
     "build:api": "npm run build -w @eitf/api",
     "build:web": "npm run build -w @eitf/web",
+    "build:orbit": "npm run build -w @eitf/orbit",
     "db:generate": "npm run prisma:generate -w @eitf/api",
     "db:migrate": "npm run prisma:migrate -w @eitf/api",
     "db:seed": "npm run prisma:seed -w @eitf/api",
+    "db:ensure-accounts": "npm run prisma:ensure-accounts -w @eitf/api",
     "db:studio": "npm run prisma:studio -w @eitf/api",
     "db:up": "node scripts/start-embedded-pg.mjs",
+    "start:all": "node scripts/start-localhost.mjs",
+    "start:localhost": "node scripts/start-localhost.mjs",
+    "start:public": "node scripts/start-public-tunnel.mjs",
+    "stop:public": "node scripts/stop-public-tunnel.mjs",
+    "docker:up": "docker compose --env-file .env.production up -d --build",
+    "docker:up:tunnel": "docker compose --env-file .env.production --profile tunnel up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:verify": "bash scripts/startup-verify.sh",
+    "smoke-test": "node scripts/smoke-test.mjs",
+    "load-test": "node scripts/load-test.mjs",
+    "soak-test": "node scripts/soak-test.mjs",
+    "monitor": "node scripts/monitor-health.mjs",
+    "security-test": "node scripts/security-pentest.mjs",
     "lint": "npm run lint -w @eitf/api & npm run lint -w @eitf/web"
   },
   "engines": {

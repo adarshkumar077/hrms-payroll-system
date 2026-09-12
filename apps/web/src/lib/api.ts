@@ -1,12 +1,13 @@
 export function getApiBaseUrl(): string {
-  // Explicit override (optional). Prefer same-origin so one public URL works everywhere.
-  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  // Browser always uses same-origin `/api/v1` (Next.js rewrites to the API).
+  // That way http://localhost:3000 and https://*.trycloudflare.com both work;
+  // never point the browser at localhost:3001 from a public URL.
   if (typeof window !== 'undefined') {
-    // Browser calls same host; Next.js rewrites /api/v1 → backend
     return `${window.location.origin}/api/v1`;
   }
-  // Server-side callers can opt into Docker's internal API hostname.
-  return process.env.API_INTERNAL_URL ? `${process.env.API_INTERNAL_URL}/api/v1` : '/api/v1';
+  if (process.env.API_INTERNAL_URL) return `${process.env.API_INTERNAL_URL}/api/v1`;
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  return '/api/v1';
 }
 
 export type SessionUser = {
@@ -109,10 +110,22 @@ export async function api<T>(
     throw new ApiError('Unable to reach the server. Please ensure the application backend is running.', 0);
   });
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { message?: string | string[]; requestId?: string };
+    const contentType = res.headers.get('content-type') ?? '';
+    let body: { message?: string | string[]; requestId?: string } = {};
+    if (contentType.includes('application/json')) {
+      body = (await res.json().catch(() => ({}))) as typeof body;
+    } else {
+      const text = await res.text().catch(() => '');
+      if (/internal server error/i.test(text)) {
+        throw new ApiError('Server error. Please refresh the page or try again shortly.', res.status);
+      }
+    }
     // Do not wipe session on unauthenticated calls (e.g. failed login)
     if (res.status === 401 && auth && typeof window !== 'undefined') {
       clearSession();
+      if (window.location.pathname !== '/') {
+        window.location.href = '/';
+      }
     }
     throw new ApiError(friendlyMessage(res.status, body), res.status, body.requestId);
   }

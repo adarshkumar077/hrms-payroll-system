@@ -31,13 +31,13 @@ export class SecurityController {
   }
 
   @Get('settings')
-  @Roles(RoleCode.CEO)
+  @Roles(RoleCode.SUPER_ADMIN)
   settings(@CurrentUser() user: AuthUser) {
     return this.security.getSecuritySettings(user.companyId);
   }
 
   @Put('settings')
-  @Roles(RoleCode.CEO)
+  @Roles(RoleCode.SUPER_ADMIN)
   update(
     @CurrentUser() user: AuthUser,
     @Body() body: { settings: Record<string, unknown> },
@@ -52,7 +52,7 @@ export class SecurityController {
   }
 
   @Get('audit')
-  @Roles(RoleCode.CEO)
+  @Roles(RoleCode.SUPER_ADMIN)
   audit(
     @CurrentUser() user: AuthUser,
     @Query('limit') limit?: string,
@@ -69,7 +69,7 @@ export class SecurityController {
   }
 
   @Get('audit/export/csv')
-  @Roles(RoleCode.CEO)
+  @Roles(RoleCode.SUPER_ADMIN)
   async auditCsv(
     @CurrentUser() user: AuthUser,
     @Query('limit') limit?: string,
@@ -107,19 +107,19 @@ export class SecurityController {
   }
 
   @Get('backups')
-  @Roles(RoleCode.CEO)
+  @Roles(RoleCode.SUPER_ADMIN)
   backups(@CurrentUser() user: AuthUser) {
     return this.security.listBackups(user.companyId);
   }
 
   @Post('backups/run')
-  @Roles(RoleCode.CEO)
+  @Roles(RoleCode.SUPER_ADMIN)
   runBackup(@CurrentUser() user: AuthUser) {
     return this.security.runBackup(user.companyId, 'manual', user.id);
   }
 
   @Get('compliance/:kind')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   compliance(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
@@ -135,7 +135,7 @@ export class SecurityController {
   }
 
   @Get('compliance/:kind/export/csv')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   async complianceCsv(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
@@ -168,7 +168,7 @@ export class SecurityController {
   }
 
   @Get('compliance/:kind/export/excel')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   async complianceExcel(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,
@@ -185,7 +185,7 @@ export class SecurityController {
   }
 
   @Get('compliance/:kind/export/pdf')
-  @Roles(RoleCode.CEO, RoleCode.HR, RoleCode.FINANCE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   async compliancePdf(
     @CurrentUser() user: AuthUser,
     @Param('kind') kind: string,

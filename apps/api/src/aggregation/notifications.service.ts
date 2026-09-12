@@ -13,7 +13,7 @@ export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
 
   private isHr(user: AuthUser) {
-    return user.roles.some((r) => (['CEO', 'HR'] as string[]).includes(r));
+    return user.roles.some((r) => (['SUPER_ADMIN', 'HR'] as string[]).includes(r));
   }
 
   async ensureDefaultTemplates(companyId: string) {

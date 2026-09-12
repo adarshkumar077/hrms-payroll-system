@@ -80,7 +80,7 @@ export default function CompanySettingsPage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => r === 'CEO' || r === 'HR')) {
+    if (!u.roles.some((r) => r === 'SUPER_ADMIN' || r === 'HR')) {
       router.replace('/dashboard');
       return;
     }

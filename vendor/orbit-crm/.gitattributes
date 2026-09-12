@@ -1,0 +1,4 @@
+# Keep the container entrypoint LF so it runs under /bin/sh in Alpine,
+# even when the repo is checked out on Windows.
+docker-entrypoint.sh text eol=lf
+*.sh text eol=lf

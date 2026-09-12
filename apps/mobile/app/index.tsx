@@ -1,23 +1,23 @@
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert } from 'react-native';
 import { router } from 'expo-router';
-import { API_URL } from '../lib/api';
+import { apiPublic } from '../lib/api';
 
 export default function Index() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function login() {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message ?? 'Login failed');
+      const data = await apiPublic<{ accessToken: string; user?: { roles?: string[] } }>(
+        '/auth/login',
+        {
+          method: 'POST',
+          body: JSON.stringify({ identifier, password }),
+        },
+      );
       const roles = (data.user?.roles ?? []).join(',');
       router.push({
         pathname: '/home',
@@ -38,10 +38,9 @@ export default function Index() {
       <TextInput
         style={styles.input}
         autoCapitalize="none"
-        keyboardType="email-address"
-        value={email}
-        onChangeText={setEmail}
-        placeholder="Email"
+        value={identifier}
+        onChangeText={setIdentifier}
+        placeholder="User ID (e.g. emp001)"
       />
       <TextInput
         style={styles.input}

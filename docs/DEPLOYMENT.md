@@ -1,5 +1,15 @@
 # EITF HRMS — Deployment Guide
 
+> **Production VPS + HTTPS:** See **[PRODUCTION-DEPLOYMENT.md](./PRODUCTION-DEPLOYMENT.md)** for the complete 24×7 Docker + Cloudflare Tunnel guide.
+
+## Quick start (VPS)
+
+```bash
+cp .env.production.example .env.production
+# Edit secrets + CLOUDFLARE_TUNNEL_TOKEN + PUBLIC_APP_URL
+./deploy/up.sh
+```
+
 ## Environments
 
 | Env | Purpose |

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AuditAction, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { sanitizeForLog } from '../common/sanitize-log.util';
 
 @Injectable()
 export class AuditService {
@@ -23,7 +24,7 @@ export class AuditService {
         action: params.action,
         entityType: params.entityType,
         entityId: params.entityId ?? undefined,
-        metadata: params.metadata,
+        metadata: params.metadata ? (sanitizeForLog(params.metadata) as Prisma.InputJsonValue) : undefined,
         ipAddress: params.ipAddress ?? undefined,
         userAgent: params.userAgent ?? undefined,
       },

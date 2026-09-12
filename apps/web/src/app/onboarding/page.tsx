@@ -37,7 +37,7 @@ export default function OnboardingPage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => ['CEO', 'HR'].includes(r))) {
+    if (!u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r))) {
       router.replace('/dashboard');
       return;
     }
