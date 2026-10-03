@@ -109,7 +109,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         ],
       },
       { id: 'shifts', label: 'Shifts', href: '/shifts', icon: 'shifts', adminRoles: ['SUPER_ADMIN', 'HR'] },
-      { id: 'holidays', label: 'Holidays', href: '/holidays', icon: 'holidays', employee: true, adminRoles: ['SUPER_ADMIN', 'HR'] },
+          { id: 'holidays', label: 'Holidays', href: '/holidays', icon: 'holidays', employee: true, adminRoles: ['SUPER_ADMIN', 'HR', 'ADMIN'] },
     ],
   },
   {

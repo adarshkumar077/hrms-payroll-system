@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -222,5 +220,20 @@ html.dark .input {
   .text-gradient {
     @apply bg-clip-text text-transparent;
     background-image: linear-gradient(135deg, #1d4ed8, #4f46e5);
+  }
+}
+
+/* Faster, calmer UI on phones — skip decorative motion */
+@media (max-width: 768px), (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-slide-in,
+  .animate-count-up {
+    animation: none !important;
+  }
+  .card-hover:hover {
+    transform: none;
+  }
+  .btn-primary:active {
+    transform: none;
   }
 }

@@ -6,16 +6,18 @@ const nextConfig = {
     'localhost',
     '127.0.0.1',
     '192.168.1.69',
+    '192.168.0.0/16',
     '192.168.80.1',
     '192.168.119.1',
     '172.28.16.1',
+    '10.0.0.0/8',
     'trycloudflare.com',
     '*.trycloudflare.com',
-    'than-structured-expects-genesis.trycloudflare.com',
-    'tablets-tee-collected-sword.trycloudflare.com',
     'cfargotunnel.com',
     '*.cfargotunnel.com',
   ],
+  compress: true,
+  poweredByHeader: false,
   async rewrites() {
     const apiInternal = process.env.API_INTERNAL_URL || 'http://127.0.0.1:3001';
     return [

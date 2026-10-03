@@ -23,13 +23,22 @@ import {
   MarkAttendanceDto,
 } from './dto/attendance.dto';
 import { isHrOrAbove, assertEmployeeScope } from '../common/authorization.util';
-import { calcDailyEarning } from '../payroll/payroll-calculator';
+import { calcDailyEarning, calcDailySalary } from '../payroll/payroll-calculator';
 import {
   buildMapsUrl,
+  formatHoursClock,
   formatMinutes,
   formatTime,
   shortLocation,
+  workMinutesBetween,
 } from './attendance-format';
+import {
+  holidaysForMonth,
+  resolveCalendarDay,
+  resolveLastSaturdayOff,
+  toDateKey,
+  type CalendarHoliday,
+} from './attendance-calendar';
 import {
   CHECK_OUT_SOURCE,
   checkOutSourceLabel,
@@ -98,15 +107,15 @@ export class AttendanceService implements OnModuleInit {
     }
   }
 
-  @Cron('0 22 * * *', { timeZone: 'Asia/Kolkata' })
+  @Cron('0 21 * * *', { timeZone: 'Asia/Kolkata' })
   async cronSystemLogout() {
-    this.logger.log('10:00 PM Asia/Kolkata system logout cron');
+    this.logger.log('9:00 PM Asia/Kolkata auto-checkout cron');
     try {
       const result = await this.applySystemLogouts(new Date());
-      this.logger.log(`System logout cron closed ${result.closed} record(s)`);
+      this.logger.log(`Auto-checkout cron closed ${result.closed} record(s)`);
     } catch (e) {
       this.logger.error(
-        `System logout cron failed: ${e instanceof Error ? e.message : e}`,
+        `Auto-checkout cron failed: ${e instanceof Error ? e.message : e}`,
       );
     }
   }
@@ -218,21 +227,10 @@ export class AttendanceService implements OnModuleInit {
       where: { employeeId: opts.employeeId },
     });
     const dailySalary = payrollCfg?.dailySalary ?? 0;
-    const otMultiplier = await this.setting<number>(
-      opts.companyId,
-      'attendance.ot_multiplier',
-      1.5,
-    );
     const baseEarning = calcDailyEarning(opts.status, dailySalary);
-    const otPay =
-      dailySalary > 0 && overtimeMinutes > 0
-        ? (dailySalary / 8 / 60) * overtimeMinutes * otMultiplier
-        : 0;
-    // Absent/ULOB store negative; otherwise clamp base at 0 then add OT
+    // Overtime minutes are tracked for display only — earnings stay at fixed daily salary.
     const todaysEarnings =
-      baseEarning.amount < 0
-        ? baseEarning.amount
-        : Math.max(0, baseEarning.amount) + otPay;
+      baseEarning.amount < 0 ? baseEarning.amount : Math.max(0, baseEarning.amount);
 
     return { workMinutes, overtimeMinutes, todaysEarnings };
   }
@@ -248,7 +246,8 @@ export class AttendanceService implements OnModuleInit {
     );
     return {
       ...result,
-      record: sanitizeAttendanceRecord(result.record, false),
+      // Own punch: include saved GPS so the client can confirm location was stored
+      record: sanitizeAttendanceRecord(result.record, true),
     };
   }
 
@@ -797,7 +796,7 @@ export class AttendanceService implements OnModuleInit {
         workMinutes: record?.workMinutes ?? null,
         remarks:
           record?.correctionNote ??
-          (record?.checkOutSource === CHECK_OUT_SOURCE.SYSTEM_LOGOUT ? 'System Logout' : null),
+          (record?.checkOutSource === CHECK_OUT_SOURCE.SYSTEM_LOGOUT ? 'Auto Checkout' : null),
       });
     }
 
@@ -879,19 +878,59 @@ export class AttendanceService implements OnModuleInit {
       throw new NotFoundException('Employee not found');
     }
 
-    const records = await this.prisma.attendanceRecord.findMany({
-      where: {
-        companyId: user.companyId,
-        date: { gte: from, lte: to },
-        employeeId: { in: employees.map((e) => e.id) },
-      },
-      orderBy: [{ employeeId: 'asc' }, { date: 'asc' }],
-    });
+    const empIds = employees.map((e) => e.id);
+    const [records, payrollConfigs, holidayRows] = await Promise.all([
+      this.prisma.attendanceRecord.findMany({
+        where: {
+          companyId: user.companyId,
+          date: { gte: from, lte: to },
+          employeeId: { in: empIds },
+        },
+        orderBy: [{ employeeId: 'asc' }, { date: 'asc' }],
+      }),
+      this.prisma.employeePayrollConfig.findMany({
+        where: { employeeId: { in: empIds } },
+        select: {
+          employeeId: true,
+          dailySalary: true,
+          grossMonthly: true,
+          workingDays: true,
+        },
+      }),
+      this.prisma.holiday.findMany({
+        where: {
+          companyId: user.companyId,
+          OR: [
+            { date: { gte: from, lte: to } },
+            { repeatYearly: true },
+          ],
+        },
+        orderBy: { date: 'asc' },
+      }),
+    ]);
 
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const byEmpDate = new Map(
       records.map((r) => [`${r.employeeId}:${r.date.toISOString().slice(0, 10)}`, r]),
     );
+    const payrollByEmp = new Map(payrollConfigs.map((c) => [c.employeeId, c]));
+    const calendarHolidays: CalendarHoliday[] = holidaysForMonth(
+      holidayRows.map((h) => ({
+        id: h.id,
+        name: h.name,
+        date: toDateKey(h.date),
+        type: h.type,
+        isPaid: h.isPaid,
+        systemTag: h.systemTag,
+        dayStatus: h.dayStatus,
+        repeatYearly: h.repeatYearly,
+      })),
+      year,
+      month,
+    );
+    const holidayByDate = new Map(calendarHolidays.map((h) => [toDateKey(h.date), h]));
+    const lastSaturday = resolveLastSaturdayOff(year, month, calendarHolidays);
+    const daysInMonth = to.getUTCDate();
 
     const privileged = this.isHr(user);
     const rows: {
@@ -900,6 +939,8 @@ export class AttendanceService implements OnModuleInit {
       employeeName: string;
       date: string;
       dayName: string;
+      holidayName: string | null;
+      holidayType: string | null;
       inTime: string;
       inLocation: string;
       outTime: string;
@@ -907,53 +948,130 @@ export class AttendanceService implements OnModuleInit {
       status: string;
       workingHours: string;
       overtime: string;
+      dailySalary: number;
       todaysEarnings: number | null;
+      runningTotal: number;
       checkInSelfieUrl: string | null;
       checkOutSelfieUrl: string | null;
       checkInMapsUrl: string | null;
       checkOutMapsUrl: string | null;
+      checkInLatitude: number | null;
+      checkInLongitude: number | null;
+      checkOutLatitude: number | null;
+      checkOutLongitude: number | null;
       workMinutes: number | null;
       overtimeMinutes: number;
       checkOutSource: string | null;
       checkOutLabel: string | null;
     }[] = [];
 
-    const daysInMonth = to.getUTCDate();
+    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
     for (const emp of employees) {
+      // Own sheet (or HR): show GPS location captured at check-in/out
+      const showGeo = privileged || (!!user.employeeId && emp.id === user.employeeId);
+      const cfg = payrollByEmp.get(emp.id);
+      const dailySalary = round2(
+        cfg?.dailySalary ??
+          calcDailySalary(cfg?.grossMonthly ?? 0, cfg?.workingDays ?? daysInMonth),
+      );
+      let runningTotal = 0;
+
       for (let d = 1; d <= daysInMonth; d++) {
         const dt = new Date(Date.UTC(year, month - 1, d));
         const key = dt.toISOString().slice(0, 10);
         const record = byEmpDate.get(`${emp.id}:${key}`);
         const dayName = dayNames[dt.getUTCDay()];
+        const cal = resolveCalendarDay({
+          dateKey: key,
+          utcDay: dt.getUTCDay(),
+          holiday: holidayByDate.get(key) ?? null,
+          lastSaturday,
+          hasCheckIn: !!record?.checkInAt,
+        });
         const outLabel = checkOutSourceLabel(record?.checkOutSource);
+        const hasCheckout = !!record?.checkOutAt;
+        const workMins = hasCheckout
+          ? workMinutesBetween(record?.checkInAt, record?.checkOutAt, record?.workMinutes)
+          : null;
+        const otMins = hasCheckout ? (record?.overtimeMinutes ?? 0) : 0;
+        const inLoc = showGeo
+          ? shortLocation(record?.checkInAddress, record?.checkInLatitude, record?.checkInLongitude)
+          : '—';
+        const outLoc = !showGeo
+          ? outLabel === 'Auto Checkout'
+            ? 'Auto Checkout'
+            : '—'
+          : shortLocation(
+              record?.checkOutAddress,
+              record?.checkOutLatitude,
+              record?.checkOutLongitude,
+            ) !== '—'
+            ? shortLocation(
+                record?.checkOutAddress,
+                record?.checkOutLatitude,
+                record?.checkOutLongitude,
+              )
+            : outLabel === 'Auto Checkout'
+              ? 'Auto Checkout'
+              : '—';
+
+        const status = record?.checkInAt
+          ? record.status
+          : (cal.autoStatus ?? record?.status ?? 'A');
+
+        // Fixed daily salary rules — never inflate from OT / late checkout.
+        let todaysEarnings: number | null = null;
+        if (record?.checkInAt && !hasCheckout) {
+          todaysEarnings = null; // pending checkout
+        } else if (cal.autoStatus && !record?.checkInAt) {
+          todaysEarnings = cal.paid
+            ? round2(calcDailyEarning(cal.autoStatus, dailySalary, { holidayPaid: cal.paid }).amount)
+            : 0;
+        } else if (record) {
+          todaysEarnings = round2(
+            calcDailyEarning(record.status, dailySalary, {
+              holidayPaid: cal.paid,
+            }).amount,
+          );
+        } else if (cal.autoStatus) {
+          todaysEarnings = cal.paid
+            ? round2(calcDailyEarning(cal.autoStatus, dailySalary, { holidayPaid: cal.paid }).amount)
+            : 0;
+        }
+
+        if (todaysEarnings != null) runningTotal = round2(runningTotal + todaysEarnings);
+
         rows.push({
           employeeId: emp.id,
           employeeCode: emp.employeeCode,
           employeeName: `${emp.firstName}${emp.lastName ? ` ${emp.lastName}` : ''}`,
           date: key,
           dayName,
+          holidayName: cal.holidayName,
+          holidayType: cal.holidayType,
           inTime: formatTime(record?.checkInAt),
-          inLocation: privileged ? shortLocation(record?.checkInAddress) : '—',
+          inLocation: inLoc,
           outTime: formatTime(record?.checkOutAt),
-          outLocation: privileged
-            ? record?.checkOutSource === CHECK_OUT_SOURCE.SYSTEM_LOGOUT
-              ? 'System Logout'
-              : shortLocation(record?.checkOutAddress)
-            : outLabel === 'System Logout'
-              ? 'System Logout'
-              : '—',
-          status: record?.status ?? 'A',
-          workingHours: formatMinutes(record?.workMinutes),
-          overtime: formatMinutes(record?.overtimeMinutes ?? 0),
-          todaysEarnings: record?.todaysEarnings ?? null,
-          checkInSelfieUrl: privileged
+          outLocation: outLoc,
+          status,
+          workingHours: formatMinutes(workMins),
+          overtime: formatMinutes(otMins > 0 ? otMins : null),
+          dailySalary,
+          todaysEarnings,
+          runningTotal,
+          checkInSelfieUrl: showGeo
             ? (record?.checkInSelfieUrl ?? record?.selfieUrl ?? null)
             : null,
-          checkOutSelfieUrl: privileged ? (record?.checkOutSelfieUrl ?? null) : null,
-          checkInMapsUrl: privileged ? (record?.checkInMapsUrl ?? null) : null,
-          checkOutMapsUrl: privileged ? (record?.checkOutMapsUrl ?? null) : null,
-          workMinutes: record?.workMinutes ?? null,
-          overtimeMinutes: record?.overtimeMinutes ?? 0,
+          checkOutSelfieUrl: showGeo ? (record?.checkOutSelfieUrl ?? null) : null,
+          checkInMapsUrl: showGeo ? (record?.checkInMapsUrl ?? null) : null,
+          checkOutMapsUrl: showGeo ? (record?.checkOutMapsUrl ?? null) : null,
+          checkInLatitude: showGeo ? (record?.checkInLatitude ?? null) : null,
+          checkInLongitude: showGeo ? (record?.checkInLongitude ?? null) : null,
+          checkOutLatitude: showGeo ? (record?.checkOutLatitude ?? null) : null,
+          checkOutLongitude: showGeo ? (record?.checkOutLongitude ?? null) : null,
+          workMinutes: workMins,
+          overtimeMinutes: otMins,
           checkOutSource: record?.checkOutSource ?? null,
           checkOutLabel: outLabel,
         });
@@ -966,6 +1084,7 @@ export class AttendanceService implements OnModuleInit {
   async recordDetail(user: AuthUser, employeeId: string, date: string) {
     assertEmployeeScope(user, employeeId);
     const privileged = this.isHr(user);
+    const showGeo = privileged || (!!user.employeeId && employeeId === user.employeeId);
     const emp = await this.prisma.employee.findFirst({
       where: { id: employeeId, companyId: user.companyId },
       select: { id: true, employeeCode: true, firstName: true, lastName: true },
@@ -981,14 +1100,14 @@ export class AttendanceService implements OnModuleInit {
       },
     });
 
-    const safeRecord = record ? sanitizeAttendanceRecord(record, privileged) : null;
+    const safeRecord = record ? sanitizeAttendanceRecord(record, showGeo) : null;
     const outLabel = checkOutSourceLabel(record?.checkOutSource);
 
     return {
       employee: emp,
       date: day.toISOString().slice(0, 10),
       record: safeRecord,
-      punches: privileged
+      punches: showGeo
         ? (record?.punches ?? [])
         : ((safeRecord as { punches?: unknown[] } | null)?.punches ?? []),
       auditLogs: privileged
@@ -998,16 +1117,28 @@ export class AttendanceService implements OnModuleInit {
         ? {
             inTime: formatTime(record.checkInAt),
             outTime: formatTime(record.checkOutAt),
-            inLocation: privileged ? shortLocation(record.checkInAddress) : '—',
-            outLocation: privileged
-              ? record.checkOutSource === CHECK_OUT_SOURCE.SYSTEM_LOGOUT
+            inLocation: showGeo
+              ? shortLocation(
+                  record.checkInAddress,
+                  record.checkInLatitude,
+                  record.checkInLongitude,
+                )
+              : '—',
+            outLocation: !showGeo
+              ? outLabel === 'System Logout'
                 ? 'System Logout'
-                : shortLocation(record.checkOutAddress)
-              : outLabel === 'System Logout'
+                : '—'
+              : record.checkOutSource === CHECK_OUT_SOURCE.SYSTEM_LOGOUT
                 ? 'System Logout'
-                : '—',
-            workingHours: formatMinutes(record.workMinutes),
-            overtime: formatMinutes(record.overtimeMinutes),
+                : shortLocation(
+                    record.checkOutAddress,
+                    record.checkOutLatitude,
+                    record.checkOutLongitude,
+                  ),
+            workingHours: formatHoursClock(
+              workMinutesBetween(record.checkInAt, record.checkOutAt, record.workMinutes),
+            ),
+            overtime: formatHoursClock(record.overtimeMinutes ?? 0),
             checkOutSource: record.checkOutSource ?? null,
             checkOutLabel: outLabel,
           }
@@ -1217,8 +1348,8 @@ export class AttendanceService implements OnModuleInit {
   }
 
   /**
-   * Close open IN records whose 10:00 PM Asia/Kolkata deadline has passed.
-   * No selfie/GPS. Idempotent — skips records that already have checkOutAt.
+   * Close open IN records whose 9:00 PM Asia/Kolkata deadline has passed.
+   * No selfie/GPS required. Idempotent — skips records that already have checkOutAt.
    */
   async applySystemLogouts(now = new Date()) {
     const open = await this.prisma.attendanceRecord.findMany({
@@ -1251,21 +1382,35 @@ export class AttendanceService implements OnModuleInit {
       status: AttendanceDayStatus;
       checkInAt: Date | null;
       isLate: boolean;
+      checkInLatitude?: number | null;
+      checkInLongitude?: number | null;
+      checkInAddress?: string | null;
+      checkInMapsUrl?: string | null;
     },
     logoutAt: Date,
   ): Promise<boolean> {
     if (!rec.checkInAt) return false;
+
+    const autoAddress =
+      rec.checkInAddress?.trim()
+        ? `${rec.checkInAddress.trim()} (Auto Checkout 9:00 PM)`
+        : 'Auto Checkout at 9:00 PM';
+    const autoMaps =
+      rec.checkInMapsUrl ??
+      (rec.checkInLatitude != null && rec.checkInLongitude != null
+        ? buildMapsUrl(Number(rec.checkInLatitude), Number(rec.checkInLongitude))
+        : null);
 
     const claimed = await this.prisma.attendanceRecord.updateMany({
       where: { id: rec.id, checkOutAt: null },
       data: {
         checkOutAt: logoutAt,
         checkOutSource: CHECK_OUT_SOURCE.SYSTEM_LOGOUT,
-        checkOutLatitude: null,
-        checkOutLongitude: null,
-        checkOutAddress: null,
+        checkOutLatitude: rec.checkInLatitude ?? null,
+        checkOutLongitude: rec.checkInLongitude ?? null,
+        checkOutAddress: autoAddress,
         checkOutSelfieUrl: null,
-        checkOutMapsUrl: null,
+        checkOutMapsUrl: autoMaps,
       },
     });
     if (claimed.count === 0) return false;
@@ -1304,6 +1449,10 @@ export class AttendanceService implements OnModuleInit {
         todaysEarnings: computed.todaysEarnings,
         status,
         checkOutSource: CHECK_OUT_SOURCE.SYSTEM_LOGOUT,
+        checkOutAddress: autoAddress,
+        checkOutMapsUrl: autoMaps,
+        checkOutLatitude: rec.checkInLatitude ?? null,
+        checkOutLongitude: rec.checkInLongitude ?? null,
       },
     });
 
@@ -1315,7 +1464,11 @@ export class AttendanceService implements OnModuleInit {
         punchedAt: logoutAt,
         punchType: 'OUT',
         method: AttendanceMethod.MANUAL,
-        deviceInfo: 'SYSTEM LOGOUT',
+        latitude: rec.checkInLatitude ?? undefined,
+        longitude: rec.checkInLongitude ?? undefined,
+        address: autoAddress,
+        mapsUrl: autoMaps ?? undefined,
+        deviceInfo: 'AUTO_CHECKOUT_9PM',
       },
     });
 
@@ -1328,12 +1481,15 @@ export class AttendanceService implements OnModuleInit {
       afterJson: JSON.stringify({
         checkOutAt: logoutAt.toISOString(),
         checkOutSource: CHECK_OUT_SOURCE.SYSTEM_LOGOUT,
+        workMinutes: computed.workMinutes,
+        overtimeMinutes: computed.overtimeMinutes,
+        todaysEarnings: computed.todaysEarnings,
       }),
-      note: 'System Logout at 10:00 PM',
+      note: 'Auto Checkout at 9:00 PM',
     });
 
     this.logger.log(
-      `SYSTEM LOGOUT applied for employee ${rec.employeeId} record ${rec.id} at ${logoutAt.toISOString()}`,
+      `Auto Checkout applied for employee ${rec.employeeId} record ${rec.id} at ${logoutAt.toISOString()}`,
     );
     return true;
   }

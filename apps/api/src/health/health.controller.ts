@@ -27,16 +27,25 @@ export class HealthController {
     if (redisUrl) {
       try {
         const { default: Redis } = await import('ioredis');
-        const client = new Redis(redisUrl, { connectTimeout: 3000, maxRetriesPerRequest: 1, lazyConnect: true });
+        const client = new Redis(redisUrl, {
+          connectTimeout: 2000,
+          maxRetriesPerRequest: 1,
+          lazyConnect: true,
+          enableOfflineQueue: false,
+          retryStrategy: () => null,
+        });
+        client.on('error', () => undefined);
         await client.connect();
         await client.ping();
-        await client.quit();
+        await client.quit().catch(() => client.disconnect());
         redis = 'ok';
       } catch {
+        // Redis is optional for local/dev; do not fail the process on connect noise.
         redis = 'error';
       }
     }
-    const status = db === 'ok' && redis !== 'error' ? 'ok' : 'degraded';
+    // DB is required; Redis is optional (queues/cache only when available).
+    const status = db === 'ok' ? 'ok' : 'degraded';
     const body = {
       status,
       service: 'eitf-hrms-api',

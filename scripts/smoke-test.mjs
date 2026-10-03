@@ -9,8 +9,8 @@ if (!base || base.includes('localhost') || base.includes('192.168')) {
   process.exit(1);
 }
 
-const user = process.env.LOAD_TEST_USER || 'superadmin';
-const pass = process.env.LOAD_TEST_PASS || 'Super@123';
+const user = process.env.LOAD_TEST_USER || 'admin@eitf.in';
+const pass = process.env.LOAD_TEST_PASS || 'Admin@123';
 
 const checks = [];
 

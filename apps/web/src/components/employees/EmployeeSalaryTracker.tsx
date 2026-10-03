@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { EARNING_COLOR_CLASS, formatEarningAmount } from '@/lib/payroll-calculator';
+import { onAttendanceChanged } from '@/lib/attendance-sync';
 
 type DailyRow = {
   date: string;
@@ -58,19 +59,45 @@ export function EmployeeSalaryTracker({ employeeId, useMeEndpoint, title }: Prop
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    setError('');
-    const path = useMeEndpoint
-      ? '/me/salary-tracker'
-      : `/employees/${employeeId}/salary-tracker`;
-    api<TrackerData>(path)
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load salary tracker'))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    function refresh(showSpinner: boolean) {
+      if (showSpinner) setLoading(true);
+      setError('');
+      const path = useMeEndpoint
+        ? '/me/salary-tracker'
+        : `/employees/${employeeId}/salary-tracker`;
+      api<TrackerData>(path, { retries: 0, timeoutMs: 15000 })
+        .then((d) => {
+          if (!cancelled) setData(d);
+        })
+        .catch((e) => {
+          if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load salary tracker');
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }
+    // Defer heavy tracker so dashboard shell paints first on mobile.
+    const boot = window.setTimeout(() => refresh(true), 400);
+    const unsub = onAttendanceChanged(() => refresh(false));
+    return () => {
+      cancelled = true;
+      window.clearTimeout(boot);
+      unsub();
+    };
   }, [employeeId, useMeEndpoint]);
 
-  if (loading) return <p className="text-sm text-ink/60">Loading salary tracker…</p>;
-  if (error) return <p className="text-sm text-red-700">{error}</p>;
+  if (loading && !data) return <p className="text-sm text-ink/60">Loading salary tracker…</p>;
+  if (error && !data) {
+    return (
+      <p className="text-sm text-red-700">
+        {error}{' '}
+        <button type="button" className="underline" onClick={() => window.location.reload()}>
+          Retry
+        </button>
+      </p>
+    );
+  }
   if (!data) return null;
 
   return (
@@ -107,7 +134,7 @@ export function EmployeeSalaryTracker({ employeeId, useMeEndpoint, title }: Prop
               <th className="px-2 py-2">Out</th>
               <th className="px-2 py-2">Hours</th>
               <th className="px-2 py-2">Daily Salary</th>
-              <th className="px-2 py-2">Earning / Deduction</th>
+              <th className="px-2 py-2">Today&apos;s Earnings</th>
               <th className="px-2 py-2">Running Total</th>
             </tr>
           </thead>

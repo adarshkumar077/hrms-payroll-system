@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, getStoredUser, getToken, getApiBaseUrl } from '@/lib/api';
 import { isAdmin } from '@/lib/roles';
+import { onAttendanceChanged } from '@/lib/attendance-sync';
+import { SheetQuickActionBar } from '@/components/attendance/SheetQuickActionBar';
 
 type SheetRow = {
   employeeId: string;
@@ -12,20 +14,15 @@ type SheetRow = {
   employeeName: string;
   date: string;
   dayName: string;
+  holidayName?: string | null;
+  holidayType?: string | null;
   inTime: string;
-  inLocation: string;
   outTime: string;
-  outLocation: string;
   status: string;
   workingHours: string;
-  overtime: string;
+  dailySalary: number;
   todaysEarnings: number | null;
-  checkInSelfieUrl: string | null;
-  checkOutSelfieUrl: string | null;
-  checkInMapsUrl: string | null;
-  checkOutMapsUrl: string | null;
-  workMinutes: number | null;
-  overtimeMinutes: number;
+  runningTotal: number;
   checkOutSource?: string | null;
   checkOutLabel?: string | null;
 };
@@ -53,9 +50,22 @@ const STATUS_COLORS: Record<string, string> = {
   ULOB: 'bg-fuchsia-100 text-fuchsia-800',
   WO: 'bg-slate-100 text-slate-700',
   H: 'bg-indigo-100 text-indigo-800',
+  PH: 'bg-violet-100 text-violet-800',
   WFH: 'bg-cyan-100 text-cyan-800',
   OD: 'bg-orange-100 text-orange-800',
 };
+
+function money(n: number) {
+  return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function earningsLabel(n: number | null) {
+  if (n == null) return '—';
+  const abs = money(Math.abs(n));
+  if (n > 0) return `+${abs}`;
+  if (n < 0) return `−${abs}`;
+  return money(0);
+}
 
 export default function AttendanceSheetPage() {
   return (
@@ -75,14 +85,17 @@ function AttendanceSheetInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(
+    Number(searchParams.get('year')) || now.getFullYear(),
+  );
+  const [month, setMonth] = useState(
+    Number(searchParams.get('month')) || now.getMonth() + 1,
+  );
   const [employeeId, setEmployeeId] = useState(searchParams.get('employeeId') ?? '');
   const [employees, setEmployees] = useState<EmpOption[]>([]);
   const [rows, setRows] = useState<SheetRow[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [lightbox, setLightbox] = useState<string | null>(null);
   const [hr, setHr] = useState(false);
 
   useEffect(() => {
@@ -102,7 +115,7 @@ function AttendanceSheetInner() {
     }
   }, [router]);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -119,14 +132,34 @@ function AttendanceSheetInner() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [year, month, employeeId]);
 
   useEffect(() => {
     if (!hr && !employeeId) return;
     if (hr && !employeeId) return;
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [employeeId, hr]);
+    void load();
+  }, [employeeId, hr, year, month, load]);
+
+  useEffect(() => {
+    return onAttendanceChanged(() => {
+      if (!employeeId && hr) return;
+      void load();
+    });
+  }, [employeeId, hr, load]);
+
+  // Soft refresh so 9 PM auto-checkout and other-tab punches appear without a full reload.
+  useEffect(() => {
+    if (!employeeId && hr) return;
+    const onFocus = () => void load();
+    window.addEventListener('focus', onFocus);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load();
+    }, 60_000);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.clearInterval(id);
+    };
+  }, [employeeId, hr, load]);
 
   const showEmployeeCol = useMemo(
     () => rows.some((r, _i, arr) => arr[0] && r.employeeId !== arr[0].employeeId),
@@ -134,60 +167,33 @@ function AttendanceSheetInner() {
   );
 
   function downloadCsv() {
-    const headers = hr
-      ? [
-          'Date',
-          'Day',
-          'In Time',
-          'In Location',
-          'Out Time',
-          'Out Location',
-          'OUT source',
-          'Status',
-          'Working Hours',
-          'Overtime',
-          "Today's Earnings",
-        ]
-      : [
-          'Date',
-          'Day',
-          'In Time',
-          'Out Time',
-          'OUT source',
-          'Status',
-          'Working Hours',
-          'Overtime',
-          "Today's Earnings",
-        ];
+    const headers = [
+      'Date',
+      'Day',
+      'Holiday',
+      'Status',
+      'In',
+      'Out',
+      'Hours',
+      'Daily Salary',
+      "Today's Earnings",
+      'Running Total',
+    ];
     const lines = [
       headers.join(','),
       ...rows.map((r) =>
-        (hr
-          ? [
-              r.date,
-              r.dayName,
-              r.inTime,
-              `"${(r.inLocation ?? '').replace(/"/g, '""')}"`,
-              r.outTime,
-              `"${(r.outLocation ?? '').replace(/"/g, '""')}"`,
-              r.checkOutLabel ?? '',
-              r.status,
-              r.workingHours,
-              r.overtime,
-              r.todaysEarnings ?? '',
-            ]
-          : [
-              r.date,
-              r.dayName,
-              r.inTime,
-              r.outTime,
-              r.checkOutLabel ?? '',
-              r.status,
-              r.workingHours,
-              r.overtime,
-              r.todaysEarnings ?? '',
-            ]
-        ).join(','),
+        [
+          r.date,
+          r.dayName,
+          `"${(r.holidayName ?? '').replace(/"/g, '""')}"`,
+          r.status,
+          r.inTime,
+          r.outTime,
+          r.workingHours,
+          r.dailySalary,
+          r.todaysEarnings ?? '',
+          r.runningTotal,
+        ].join(','),
       ),
     ];
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -232,13 +238,17 @@ function AttendanceSheetInner() {
     }
   }
 
+  const colCount = (showEmployeeCol ? 1 : 0) + 10;
+
   return (
     <main className="max-w-7xl mx-auto px-4 py-10">
       <Link href="/attendance" className="text-sm text-brand-600 hover:underline">
         ← Attendance
       </Link>
       <h1 className="font-display text-3xl text-brand-700 mt-2">Attendance Sheet</h1>
-      <p className="text-sm text-ink/60 mb-4">Monthly Excel-style view with location, OT, and earnings</p>
+      <p className="text-sm text-ink/60 mb-4">
+        Daily in/out, hours, salary, and running earnings — updates live after check-in and checkout
+      </p>
 
       <div className="flex flex-wrap gap-2 mb-4 items-end">
         {hr && (
@@ -288,11 +298,11 @@ function AttendanceSheetInner() {
         </div>
         <button
           type="button"
-          onClick={load}
+          onClick={() => void load()}
           disabled={loading || (hr && !employeeId)}
           className="bg-brand-600 text-white px-4 py-2 rounded text-sm disabled:opacity-60"
         >
-          {loading ? 'Loading…' : 'Load'}
+          {loading ? 'Loading…' : 'Refresh'}
         </button>
         <button
           type="button"
@@ -324,151 +334,112 @@ function AttendanceSheetInner() {
 
       {error && <p className="text-sm text-red-700 mb-2">{error}</p>}
 
-      <div className="overflow-x-auto rounded-lg border border-brand-100 bg-white/80">
-        <table className="w-full text-sm">
-          <thead className="bg-mist/50 text-left">
+      {hr && (
+        <SheetQuickActionBar
+          year={year}
+          month={month}
+          onChanged={() => {
+            void load();
+          }}
+        />
+      )}
+
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+        <table className="w-full text-sm min-w-[860px]">
+          <thead className="bg-slate-100 text-left text-slate-700">
             <tr>
-              {showEmployeeCol && <th className="px-3 py-2">Employee</th>}
-              <th className="px-3 py-2">Date</th>
-              <th className="px-3 py-2">Day</th>
-              <th className="px-3 py-2">{hr ? 'In Time - Location' : 'In Time'}</th>
-              <th className="px-3 py-2">{hr ? 'Out Time - Location' : 'Out Time'}</th>
-              <th className="px-3 py-2">OUT source</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Working Hours</th>
-              <th className="px-3 py-2">Overtime</th>
-              <th className="px-3 py-2">Today&apos;s Earnings</th>
+              {showEmployeeCol && (
+                <th className="px-3 py-2.5 font-medium whitespace-nowrap">Employee</th>
+              )}
+              <th className="px-3 py-2.5 font-medium whitespace-nowrap">Date</th>
+              <th className="px-3 py-2.5 font-medium whitespace-nowrap">Day</th>
+              <th className="px-3 py-2.5 font-medium whitespace-nowrap">Holiday</th>
+              <th className="px-3 py-2.5 font-medium whitespace-nowrap">Status</th>
+              <th className="px-3 py-2.5 font-medium whitespace-nowrap">In</th>
+              <th className="px-3 py-2.5 font-medium whitespace-nowrap">Out</th>
+              <th className="px-3 py-2.5 font-medium whitespace-nowrap">Hours</th>
+              <th className="px-3 py-2.5 font-medium whitespace-nowrap text-right">Daily Salary</th>
+              <th className="px-3 py-2.5 font-medium whitespace-nowrap text-right">Today&apos;s Earnings</th>
+              <th className="px-3 py-2.5 font-medium whitespace-nowrap text-right">Running Total</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={`${r.employeeId}-${r.date}`} className="border-t border-mist align-top">
-                {showEmployeeCol && (
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {r.employeeCode}
-                    <br />
-                    <span className="text-xs text-ink/50">{r.employeeName}</span>
+            {rows.map((r) => {
+              const earningPositive = (r.todaysEarnings ?? 0) > 0;
+              const earningNegative = (r.todaysEarnings ?? 0) < 0;
+              return (
+                <tr
+                  key={`${r.employeeId}-${r.date}`}
+                  className="border-t border-slate-100 hover:bg-slate-50/60"
+                >
+                  {showEmployeeCol && (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {r.employeeCode}
+                      <br />
+                      <span className="text-xs text-ink/50">{r.employeeName}</span>
+                    </td>
+                  )}
+                  <td className="px-3 py-2 whitespace-nowrap tabular-nums text-slate-800">
+                    <Link
+                      href={`/attendance?employeeId=${r.employeeId}&date=${r.date}`}
+                      className="text-brand-600 hover:underline"
+                    >
+                      {r.date}
+                    </Link>
                   </td>
-                )}
-                <td className="px-3 py-2 whitespace-nowrap">
-                  <Link
-                    href={`/attendance?employeeId=${r.employeeId}&date=${r.date}`}
-                    className="text-brand-600 hover:underline"
-                  >
-                    {r.date}
-                  </Link>
-                </td>
-                <td className="px-3 py-2">{r.dayName.slice(0, 3)}</td>
-                <td className="px-3 py-2">
-                  <div className="flex items-start gap-2">
-                    {hr && r.checkInSelfieUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setLightbox(r.checkInSelfieUrl)}
-                        className="shrink-0"
-                        title="View check-in selfie"
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={r.checkInSelfieUrl}
-                          alt="In selfie"
-                          className="w-8 h-8 rounded object-cover border border-mist"
-                        />
-                      </button>
-                    )}
-                    <div>
-                      <div>{r.inTime}</div>
-                      {hr && (
-                        <div className="text-xs text-ink/60">
-                          {r.checkInMapsUrl ? (
-                            <a
-                              href={r.checkInMapsUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-brand-600 hover:underline"
-                            >
-                              {r.inLocation}
-                            </a>
-                          ) : (
-                            r.inLocation
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex items-start gap-2">
-                    {hr && r.checkOutSelfieUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setLightbox(r.checkOutSelfieUrl)}
-                        className="shrink-0"
-                        title="View check-out selfie"
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={r.checkOutSelfieUrl}
-                          alt="Out selfie"
-                          className="w-8 h-8 rounded object-cover border border-mist"
-                        />
-                      </button>
-                    )}
-                    <div>
-                      <div>{r.outTime}</div>
-                      {hr && r.checkOutSource !== 'SYSTEM_LOGOUT' && (
-                        <div className="text-xs text-ink/60">
-                          {r.checkOutMapsUrl ? (
-                            <a
-                              href={r.checkOutMapsUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-brand-600 hover:underline"
-                            >
-                              {r.outLocation}
-                            </a>
-                          ) : (
-                            r.outLocation
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </td>
-                <td className="px-3 py-2">
-                  {r.checkOutLabel ? (
+                  <td className="px-3 py-2 whitespace-nowrap text-slate-700">{r.dayName}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-slate-700">
+                    {r.holidayName || '—'}
+                  </td>
+                  <td className="px-3 py-2">
                     <span
-                      className={`text-xs px-2 py-0.5 rounded ${
-                        r.checkOutSource === 'SYSTEM_LOGOUT'
-                          ? 'bg-amber-100 text-amber-900 font-medium'
-                          : 'bg-slate-100 text-slate-700'
+                      className={`inline-block text-xs font-medium px-2 py-0.5 rounded ${
+                        STATUS_COLORS[r.status] ?? 'bg-gray-100 text-gray-700'
                       }`}
                     >
-                      {r.checkOutLabel}
+                      {r.status}
+                      {r.status === 'WO' || r.status === 'PH'
+                        ? r.todaysEarnings != null && r.todaysEarnings > 0
+                          ? ' (Paid)'
+                          : r.todaysEarnings === 0
+                            ? ' (Unpaid)'
+                            : ''
+                        : ''}
                     </span>
-                  ) : (
-                    '—'
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded ${STATUS_COLORS[r.status] ?? 'bg-gray-100'}`}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap tabular-nums">{r.inTime || '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap tabular-nums">
+                    <span>{r.outTime || '—'}</span>
+                    {r.checkOutSource === 'SYSTEM_LOGOUT' && r.outTime && r.outTime !== '—' && (
+                      <span className="ml-1 text-[10px] text-amber-700">Auto</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap tabular-nums">{r.workingHours || '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-slate-800">
+                    {money(r.dailySalary ?? 0)}
+                  </td>
+                  <td
+                    className={`px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium ${
+                      earningPositive
+                        ? 'text-emerald-600'
+                        : earningNegative
+                          ? 'text-red-600'
+                          : 'text-slate-500'
+                    }`}
                   >
-                    {r.status}
-                  </span>
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap">{r.workingHours}</td>
-                <td className="px-3 py-2 whitespace-nowrap">{r.overtime}</td>
-                <td className="px-3 py-2 whitespace-nowrap">
-                  {r.todaysEarnings != null ? `₹${r.todaysEarnings.toFixed(2)}` : '—'}
-                </td>
-              </tr>
-            ))}
+                    {earningsLabel(r.todaysEarnings)}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium text-slate-800">
+                    {money(r.runningTotal ?? 0)}
+                  </td>
+                </tr>
+              );
+            })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={showEmployeeCol ? 10 : 9} className="px-3 py-8 text-center text-ink/50">
+                <td colSpan={colCount} className="px-3 py-8 text-center text-ink/50">
                   {hr && !employeeId
-                    ? 'Select an employee and click Load'
+                    ? 'Select an employee to load the sheet'
                     : loading
                       ? 'Loading…'
                       : 'No rows'}
@@ -478,22 +449,6 @@ function AttendanceSheetInner() {
           </tbody>
         </table>
       </div>
-
-      {lightbox && (
-        <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
-          onClick={() => setLightbox(null)}
-          role="presentation"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={lightbox}
-            alt="Selfie"
-            className="max-w-full max-h-[90vh] rounded-lg shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
     </main>
   );
 }

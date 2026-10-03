@@ -10,6 +10,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         await this.$connect();
+        // Embedded Postgres on Windows can default client_encoding to WIN1252,
+        // which rejects emoji/Unicode in announcements and other text fields.
+        await this.$executeRawUnsafe(`SET client_encoding TO 'UTF8'`);
         return;
       } catch (err) {
         this.logger.warn(`Database connect attempt ${attempt}/${maxAttempts} failed`);

@@ -43,6 +43,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
     } else if (exception instanceof Prisma.PrismaClientValidationError) {
       status = HttpStatus.BAD_REQUEST;
       message = 'Invalid request.';
+    } else if (exception instanceof Prisma.PrismaClientUnknownRequestError) {
+      const msg = exception.message ?? '';
+      if (/22P05|WIN1252|client_encoding|character with byte sequence/i.test(msg)) {
+        status = HttpStatus.BAD_REQUEST;
+        message =
+          'Text contains characters (such as emoji) that this database cannot store. Remove them and try again, or recreate the local DB as UTF8.';
+      } else {
+        status = HttpStatus.INTERNAL_SERVER_ERROR;
+        message = 'Something went wrong. Please try again.';
+      }
     } else if (exception instanceof Error) {
       if (/ENOENT|file not found/i.test(exception.message)) {
         status = HttpStatus.NOT_FOUND;
@@ -62,7 +72,21 @@ export class AllExceptionsFilter implements ExceptionFilter {
     } else if (status === HttpStatus.BAD_REQUEST) {
       message = message || 'Invalid request.';
     } else if (status >= 500) {
-      message = 'Something went wrong. Please try again.';
+      // Keep HttpException / mapped Prisma messages; only generic-fallback unknowns
+      if (
+        !message ||
+        message === 'Something went wrong. Please try again.' ||
+        (!(exception instanceof HttpException) &&
+          !(exception instanceof Prisma.PrismaClientKnownRequestError))
+      ) {
+        const detail =
+          exception instanceof Error && exception.message && !/prisma|internal/i.test(exception.message)
+            ? exception.message.slice(0, 240)
+            : null;
+        message = detail
+          ? detail
+          : `Server error (ref ${requestId}). Please try again.`;
+      }
     }
 
     const stack = exception instanceof Error ? exception.stack : String(exception);
@@ -126,11 +150,32 @@ export class AllExceptionsFilter implements ExceptionFilter {
           status: HttpStatus.BAD_REQUEST,
           message: 'Invalid request — relationship constraint failed.',
         };
-      default:
+      case 'P2021':
+        return {
+          status: HttpStatus.SERVICE_UNAVAILABLE,
+          message:
+            'Database schema is out of date (missing table). Run migrations, then refresh.',
+        };
+      case 'P2022':
+        return {
+          status: HttpStatus.SERVICE_UNAVAILABLE,
+          message:
+            'Database schema is out of date (missing column). Run migrations, then refresh.',
+        };
+      default: {
+        const raw = error.message ?? '';
+        if (/does not exist in the current database|relation .* does not exist/i.test(raw)) {
+          return {
+            status: HttpStatus.SERVICE_UNAVAILABLE,
+            message:
+              'Database schema is out of date. Run migrations, then refresh the page.',
+          };
+        }
         return {
           status: HttpStatus.INTERNAL_SERVER_ERROR,
           message: 'Database temporarily unavailable.',
         };
+      }
     }
   }
 }

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api, getStoredUser } from '@/lib/api';
 import { ModuleAlert, ModulePage, ModuleSecondaryButton } from '@/components/layout/ModulePage';
 import { Card } from '@/components/ui/Card';
+import { onAttendanceChanged } from '@/lib/attendance-sync';
 
 type CalendarDay = {
   date: string;
@@ -93,6 +94,7 @@ export default function AttendanceCalendarPage() {
       return;
     }
     load();
+    return onAttendanceChanged(() => load());
   }, [router, load]);
 
   const monthLabel = useMemo(

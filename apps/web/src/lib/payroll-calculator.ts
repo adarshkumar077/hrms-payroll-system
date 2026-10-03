@@ -195,9 +195,10 @@ export function calcDailyEarning(
     case 'PL':
       return { amount: d, label: 'Paid Leave', color: 'blue' };
     case 'H':
+    case 'PH':
       return {
         amount: opts?.holidayPaid !== false ? d : 0,
-        label: 'Holiday',
+        label: status === 'PH' ? 'Paid Holiday' : 'Holiday',
         color: 'purple',
       };
     case 'WO':

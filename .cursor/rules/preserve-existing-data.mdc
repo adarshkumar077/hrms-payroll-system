@@ -1,0 +1,29 @@
+---
+description: Never delete, reset, overwrite, or lose existing HRMS database data
+alwaysApply: true
+---
+
+# Preserve existing HRMS data (non-negotiable)
+
+**IMPORTANT: Do not delete, reset, overwrite, or lose any existing data.**
+
+Whenever making any change, update, migration, bug fix, or UI modification in the HRMS:
+
+- All existing employee, salary, attendance, leave, payroll, asset, and other database data must remain exactly as it is.
+- Existing records must NOT be deleted or replaced.
+- Existing values must remain unchanged unless the user specifically asks to edit that particular value.
+- New fields/features must be added without affecting existing data.
+- Database migrations must be backward-compatible and must preserve all existing records (prefer additive nullable columns / defaults; never drop tables/columns with data unless explicitly approved).
+- Before making database changes: create a backup and verify existing data is present.
+- After every change: verify that previous data is still available and unchanged.
+- Never use dummy/seed data to replace real existing data.
+- Do not reset the database during development, testing, deployment, or updates (`db:reset`, `db:seed` that wipes, drop/recreate DB, truncate, destructive migrate).
+- If any change could risk existing data: **STOP** and explain the risk before proceeding. Wait for explicit user approval.
+
+**Rule: Existing data must always remain safe and available after every update.**
+
+Forbidden without explicit user approval for that exact action:
+- `prisma migrate reset`, `db:reset`, dropping/recreating databases or clusters
+- Re-running seed scripts that upsert/overwrite production-like or user-entered data
+- `DELETE`/`TRUNCATE` of business tables, bulk “reseed to fix”
+- Encoding/cluster recreate that wipes `eitf_hrms`

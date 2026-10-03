@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import {
   NotificationChannel,
   NotificationStatus,
@@ -156,16 +156,27 @@ export class NotificationsService {
 
   async createAnnouncement(user: AuthUser, dto: CreateAnnouncementDto) {
     if (!this.isHr(user)) throw new ForbiddenException();
-    const ann = await this.prisma.announcement.create({
-      data: {
-        companyId: user.companyId,
-        title: dto.title,
-        body: dto.body,
-        audience: dto.audience ?? 'ALL',
-        expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
-        createdBy: user.id,
-      },
-    });
+    let ann;
+    try {
+      ann = await this.prisma.announcement.create({
+        data: {
+          companyId: user.companyId,
+          title: dto.title,
+          body: dto.body,
+          audience: dto.audience ?? 'ALL',
+          expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
+          createdBy: user.id,
+        },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/22P05|WIN1252|character with byte sequence/i.test(msg)) {
+        throw new BadRequestException(
+          'Announcement text contains characters (such as emoji) that the database cannot store. Remove emoji/special symbols and try again.',
+        );
+      }
+      throw err;
+    }
 
     // Fan-out dashboard notifications to active employees
     const employees = await this.prisma.employee.findMany({

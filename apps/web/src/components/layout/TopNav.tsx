@@ -49,11 +49,16 @@ export function TopNav({
   }, [user.id]);
 
   useEffect(() => {
-    api<{ id: string; title: string; body?: string; createdAt?: string; readAt?: string | null }[]>(
-      '/notifications/mine',
-    )
-      .then((items) => setNotifications(items ?? []))
-      .catch(() => setNotifications([]));
+    // Defer notifications so shell + page paint first on mobile LAN.
+    const t = window.setTimeout(() => {
+      api<{ id: string; title: string; body?: string; createdAt?: string; readAt?: string | null }[]>(
+        '/notifications/mine',
+        { retries: 0, timeoutMs: 8000 },
+      )
+        .then((items) => setNotifications(items ?? []))
+        .catch(() => setNotifications([]));
+    }, 600);
+    return () => window.clearTimeout(t);
   }, [user.id]);
 
   useEffect(() => {

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getStoredUser } from '@/lib/api';
+import { isAdmin } from '@/lib/roles';
 import { StickySaveButton } from '@/components/ui/StickySaveButton';
 
 type Holiday = {
@@ -14,7 +15,20 @@ type Holiday = {
   scope: string;
   isOptional: boolean;
   isPaid: boolean;
+  systemTag?: string | null;
 };
+
+const HOLIDAY_TYPES = [
+  { value: 'FESTIVAL', label: 'Festival Holiday' },
+  { value: 'OFFICE', label: 'Office Holiday' },
+  { value: 'NATIONAL', label: 'National Holiday' },
+  { value: 'COMPANY', label: 'Company Holiday' },
+  { value: 'OPTIONAL', label: 'Optional Holiday' },
+];
+
+function typeLabel(t: string) {
+  return HOLIDAY_TYPES.find((x) => x.value === t)?.label ?? t;
+}
 
 export default function HolidaysPage() {
   const router = useRouter();
@@ -23,14 +37,23 @@ export default function HolidaysPage() {
   const [form, setForm] = useState({
     name: '',
     date: '',
-    type: 'COMPANY',
+    type: 'FESTIVAL',
     scope: 'ALL',
+    isPaid: true,
+    lastSaturdayOverride: false,
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [isHr, setIsHr] = useState(false);
+  const [canManage, setCanManage] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', date: '', type: '', scope: '' });
+  const [editForm, setEditForm] = useState({
+    name: '',
+    date: '',
+    type: '',
+    scope: '',
+    isPaid: true,
+    lastSaturdayOverride: false,
+  });
 
   function load(y = year) {
     api<Holiday[]>(`/holidays?year=${y}`)
@@ -51,7 +74,7 @@ export default function HolidaysPage() {
       router.replace('/');
       return;
     }
-    setIsHr(u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r)));
+    setCanManage(isAdmin(u));
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
@@ -65,8 +88,25 @@ export default function HolidaysPage() {
     setSaving(true);
     setError('');
     try {
-      await api('/holidays', { method: 'POST', body: JSON.stringify(form) });
-      setForm({ name: '', date: '', type: 'COMPANY', scope: 'ALL' });
+      await api('/holidays', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: form.name,
+          date: form.date,
+          type: form.type,
+          scope: form.scope,
+          isPaid: form.isPaid,
+          lastSaturdayOverride: form.lastSaturdayOverride,
+        }),
+      });
+      setForm({
+        name: '',
+        date: '',
+        type: 'FESTIVAL',
+        scope: 'ALL',
+        isPaid: true,
+        lastSaturdayOverride: false,
+      });
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Create failed');
@@ -92,6 +132,8 @@ export default function HolidaysPage() {
       date: h.date.slice(0, 10),
       type: h.type,
       scope: h.scope,
+      isPaid: h.isPaid,
+      lastSaturdayOverride: h.systemTag === 'LAST_SATURDAY_OVERRIDE',
     });
   }
 
@@ -117,13 +159,17 @@ export default function HolidaysPage() {
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-10">
-      {isHr && <StickySaveButton saving={saving} onClick={() => void create()} label="Save" />}
+      {canManage && <StickySaveButton saving={saving} onClick={() => void create()} label="Save" />}
       <Link href="/dashboard" className="text-sm text-brand-600 hover:underline">
         ← Dashboard
       </Link>
       <h1 className="font-display text-3xl text-brand-700 mt-2">
-        {isHr ? 'Holiday Manager' : 'Holiday Calendar'}
+        {canManage ? 'Holiday Manager' : 'Holiday Calendar'}
       </h1>
+      <p className="text-sm text-ink/60 mt-1 mb-4">
+        Sundays and the last Saturday of each month are automatic paid weekly offs. Add festival or
+        office holidays in advance — they appear on every employee attendance sheet.
+      </p>
       <div className="flex gap-2 my-4 items-center">
         <input
           type="number"
@@ -138,11 +184,11 @@ export default function HolidaysPage() {
       </div>
       {error && <p className="text-red-700 text-sm mb-2">{error}</p>}
 
-      {isHr && (
+      {canManage && (
         <form onSubmit={create} className="bg-white/80 border border-brand-100 rounded-lg p-4 mb-6 space-y-2">
           <input
             className="w-full rounded border border-mist px-3 py-2 text-sm"
-            placeholder="Holiday name"
+            placeholder="Holiday name (e.g. Diwali)"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             required
@@ -154,27 +200,36 @@ export default function HolidaysPage() {
             onChange={(e) => setForm({ ...form, date: e.target.value })}
             required
           />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 items-center">
             <select
               className="rounded border border-mist px-2 py-2 text-sm"
               value={form.type}
               onChange={(e) => setForm({ ...form, type: e.target.value })}
             >
-              {['NATIONAL', 'FESTIVAL', 'OPTIONAL', 'COMPANY'].map((t) => (
-                <option key={t}>{t}</option>
+              {HOLIDAY_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
               ))}
             </select>
-            <select
-              className="rounded border border-mist px-2 py-2 text-sm"
-              value={form.scope}
-              onChange={(e) => setForm({ ...form, scope: e.target.value })}
-            >
-              {['ALL', 'DEPARTMENT', 'EMPLOYEES'].map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
-            <button type="submit" className="bg-brand-600 text-white px-4 py-2 rounded text-sm">
-              Add
+            <label className="flex items-center gap-2 text-sm px-2">
+              <input
+                type="checkbox"
+                checked={form.isPaid}
+                onChange={(e) => setForm({ ...form, isPaid: e.target.checked })}
+              />
+              Paid
+            </label>
+            <label className="flex items-center gap-2 text-sm px-2">
+              <input
+                type="checkbox"
+                checked={form.lastSaturdayOverride}
+                onChange={(e) => setForm({ ...form, lastSaturdayOverride: e.target.checked })}
+              />
+              Override last Saturday WO for this month
+            </label>
+            <button type="submit" className="bg-brand-600 text-white px-4 py-2 rounded text-sm ml-auto">
+              Add Holiday
             </button>
           </div>
         </form>
@@ -200,26 +255,41 @@ export default function HolidaysPage() {
                         value={editForm.date}
                         onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
                       />
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2 items-center">
                         <select
                           className="rounded border border-mist px-2 py-1 text-sm"
                           value={editForm.type}
                           onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
                         >
-                          {['NATIONAL', 'FESTIVAL', 'OPTIONAL', 'COMPANY'].map((t) => (
-                            <option key={t}>{t}</option>
+                          {HOLIDAY_TYPES.map((t) => (
+                            <option key={t.value} value={t.value}>
+                              {t.label}
+                            </option>
                           ))}
                         </select>
-                        <select
-                          className="rounded border border-mist px-2 py-1 text-sm"
-                          value={editForm.scope}
-                          onChange={(e) => setEditForm({ ...editForm, scope: e.target.value })}
+                        <label className="flex items-center gap-1 text-xs">
+                          <input
+                            type="checkbox"
+                            checked={editForm.isPaid}
+                            onChange={(e) => setEditForm({ ...editForm, isPaid: e.target.checked })}
+                          />
+                          Paid
+                        </label>
+                        <label className="flex items-center gap-1 text-xs">
+                          <input
+                            type="checkbox"
+                            checked={editForm.lastSaturdayOverride}
+                            onChange={(e) =>
+                              setEditForm({ ...editForm, lastSaturdayOverride: e.target.checked })
+                            }
+                          />
+                          Last Sat override
+                        </label>
+                        <button
+                          type="button"
+                          className="bg-brand-600 text-white px-3 py-1 rounded text-xs"
+                          onClick={() => saveEdit(h.id)}
                         >
-                          {['ALL', 'DEPARTMENT', 'EMPLOYEES'].map((t) => (
-                            <option key={t}>{t}</option>
-                          ))}
-                        </select>
-                        <button type="button" className="bg-brand-600 text-white px-3 py-1 rounded text-xs" onClick={() => saveEdit(h.id)}>
                           Save
                         </button>
                         <button type="button" className="text-ink/50 text-xs" onClick={() => setEditingId(null)}>
@@ -232,12 +302,12 @@ export default function HolidaysPage() {
                       <div>
                         <p className="font-medium">{h.name}</p>
                         <p className="text-ink/60">
-                          {new Date(h.date).toLocaleDateString()} · {h.type} · {h.scope}
-                          {h.isOptional ? ' · optional' : ''}
-                          {h.isPaid ? '' : ' · unpaid'}
+                          {new Date(h.date).toLocaleDateString()} · {typeLabel(h.type)}
+                          {h.isPaid ? ' · Paid' : ' · Unpaid'}
+                          {h.systemTag === 'LAST_SATURDAY_OVERRIDE' ? ' · Last Saturday override' : ''}
                         </p>
                       </div>
-                      {isHr && (
+                      {canManage && (
                         <div className="flex gap-2 items-start shrink-0">
                           <button type="button" className="text-brand-600 text-xs underline" onClick={() => startEdit(h)}>
                             Edit
@@ -256,7 +326,7 @@ export default function HolidaysPage() {
         ))
       ) : (
         <div className="bg-white/80 border border-brand-100 rounded-lg p-4 text-ink/50 text-sm">
-          No holidays for this year
+          No holidays for this year — Sundays and last Saturdays still apply automatically.
         </div>
       )}
     </main>

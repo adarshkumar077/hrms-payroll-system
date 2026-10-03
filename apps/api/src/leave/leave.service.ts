@@ -155,7 +155,7 @@ export class LeaveService {
 
   /** Accrual: 0 for first N probation months → credit at end → +monthly after */
   async runMonthlyAccrual(companyId: string, asOf = new Date()) {
-    const probationMonths = await this.setting(companyId, 'leave.probation_months', 6);
+    const probationMonths = await this.setting(companyId, 'leave.probation_months', 7);
     const creditAtEnd = await this.setting(companyId, 'leave.credit_at_probation_end', 6);
     const monthlyAfter = await this.setting(companyId, 'leave.monthly_credit_after', 1);
 
@@ -283,6 +283,29 @@ export class LeaveService {
     }
     if (leaveType.code === 'OTHER' && !dto.otherTypeNote) {
       throw new BadRequestException('Please describe the leave type (Other)');
+    }
+
+    if (['PL', 'EL', 'EARNED'].includes(leaveType.code.toUpperCase())) {
+      const empForTenure = await this.prisma.employee.findUnique({
+        where: { id: user.employeeId },
+        select: { joinedAt: true },
+      });
+      const joinedAt = empForTenure?.joinedAt;
+      const now = new Date();
+      let months = 0;
+      if (joinedAt) {
+        months =
+          (now.getFullYear() - joinedAt.getFullYear()) * 12 +
+          (now.getMonth() - joinedAt.getMonth());
+        if (now.getDate() < joinedAt.getDate()) months -= 1;
+        months = Math.max(0, months);
+      }
+      const probationMonths = await this.setting(user.companyId, 'leave.probation_months', 7);
+      if (months < probationMonths) {
+        throw new BadRequestException(
+          `Paid Leave (PL) is locked until ${probationMonths} months of service (currently ${months}/${probationMonths}).`,
+        );
+      }
     }
 
     const from = dateOnly(new Date(dto.fromDate));

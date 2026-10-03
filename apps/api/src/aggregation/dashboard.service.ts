@@ -22,8 +22,15 @@ export class DashboardService {
     const now = new Date();
     const from = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
     const to = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0));
+    const todayKey = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now);
+    const todayStart = new Date(`${todayKey}T00:00:00.000Z`);
 
-    const [attendance, leaveBalances, openTickets, loans, latestPayslip, goals] =
+    const [attendance, leaveBalances, openTickets, loans, latestPayslip, goals, employee, payrollCfg, todayRecord] =
       await Promise.all([
         this.prisma.attendanceRecord.count({
           where: { employeeId, date: { gte: from, lte: to } },
@@ -52,7 +59,28 @@ export class DashboardService {
         this.prisma.performanceGoal.count({
           where: { employeeId, cycleYear: now.getFullYear(), status: 'ACTIVE' },
         }),
+        this.prisma.employee.findUnique({
+          where: { id: employeeId },
+          select: { joinedAt: true, firstName: true },
+        }),
+        this.prisma.employeePayrollConfig.findUnique({ where: { employeeId } }),
+        this.prisma.attendanceRecord.findUnique({
+          where: { employeeId_date: { employeeId, date: todayStart } },
+        }),
       ]);
+
+    const joinedAt = employee?.joinedAt ?? null;
+    let monthsOfService = 0;
+    if (joinedAt) {
+      monthsOfService =
+        (now.getFullYear() - joinedAt.getFullYear()) * 12 +
+        (now.getMonth() - joinedAt.getMonth());
+      if (now.getDate() < joinedAt.getDate()) monthsOfService -= 1;
+      monthsOfService = Math.max(0, monthsOfService);
+    }
+    const plEligible = monthsOfService >= 7;
+    const dailySalary = payrollCfg?.dailySalary ?? 0;
+    const monthlySalary = payrollCfg?.grossMonthly ?? 0;
 
     return {
       monthAttendanceDays: attendance,
@@ -73,6 +101,15 @@ export class DashboardService {
           }
         : null,
       activeGoals: goals,
+      earnings: {
+        monthsOfService,
+        plEligible,
+        plStatus: plEligible ? 'Eligible' : `Locked (${monthsOfService}/7 months)`,
+        dailySalary,
+        monthlySalary,
+        todaysEarnings: todayRecord?.todaysEarnings ?? null,
+        todayStatus: todayRecord?.status ?? null,
+      },
     };
   }
 

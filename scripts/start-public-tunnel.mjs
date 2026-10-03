@@ -121,11 +121,15 @@ async function main() {
   const out = createWriteStream(logFile, { flags: 'w' });
   console.log('\nOpening Cloudflare quick tunnel → http://127.0.0.1:3000\n');
 
-  const tunnel = spawn(bin, ['tunnel', '--url', 'http://127.0.0.1:3000', '--no-autoupdate'], {
-    cwd: root,
-    shell: false,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const tunnel = spawn(
+    bin,
+    ['tunnel', '--url', 'http://127.0.0.1:3000', '--no-autoupdate'],
+    {
+      cwd: root,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
   children.push(tunnel);
 
   let publicUrl = '';
@@ -140,7 +144,7 @@ async function main() {
       console.log('\n========================================');
       console.log('Public HTTPS URL (any device):');
       console.log(publicUrl);
-      console.log('Login: superadmin / Super@123');
+      console.log('Login: admin@eitf.in / Admin@123');
       console.log('Keep this window open. Stop: npm run stop:public  or Ctrl+C');
       console.log('========================================\n');
     }

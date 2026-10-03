@@ -590,6 +590,7 @@ enum HolidayType {
   FESTIVAL
   OPTIONAL
   COMPANY
+  OFFICE
 }
 
 enum HolidayScope {
@@ -607,6 +608,7 @@ enum AttendanceDayStatus {
   ULOB
   WO
   H
+  PH
   WFH
   OD
 }
@@ -637,6 +639,12 @@ model Holiday {
   scope         HolidayScope @default(ALL)
   isOptional    Boolean      @default(false) @map("is_optional")
   isPaid        Boolean      @default(true) @map("is_paid")
+  /// LAST_SATURDAY_OVERRIDE | WORKING_DAY
+  systemTag     String?      @map("system_tag")
+  /// PH | WO | HD | WORK — sheet/payroll day status for this calendar entry
+  dayStatus     String?      @map("day_status")
+  repeatYearly  Boolean      @default(false) @map("repeat_yearly")
+  createdById   String?      @map("created_by_id")
   departments   String[]     @default([])
   employeeIds   String[]     @default([]) @map("employee_ids")
   notes         String?
@@ -647,6 +655,8 @@ model Holiday {
 
   @@unique([companyId, date, name])
   @@index([companyId, date])
+  @@index([companyId, systemTag])
+  @@index([companyId, repeatYearly])
   @@map("holidays")
 }
 

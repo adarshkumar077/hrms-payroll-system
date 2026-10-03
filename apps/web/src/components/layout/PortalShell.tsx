@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { getStoredUser, SessionUser, api } from '@/lib/api';
@@ -7,7 +8,12 @@ import { canAccessPath } from '@/lib/navigation';
 import { isAdmin, ViewMode } from '@/lib/roles';
 import { Sidebar } from './Sidebar';
 import { TopNav } from './TopNav';
-import { AiChatWidget } from '@/components/AiChatWidget';
+import { ConnectionError } from '@/components/ui/ConnectionError';
+
+const AiChatWidget = dynamic(
+  () => import('@/components/AiChatWidget').then((m) => m.AiChatWidget),
+  { ssr: false, loading: () => null },
+);
 
 const PUBLIC_PATHS = ['/'];
 const VIEW_MODE_KEY = 'eitf-hrms-view-mode';
@@ -31,11 +37,23 @@ function persistViewMode(user: SessionUser, mode: ViewMode) {
   }
 }
 
+function deferIdle(fn: () => void, ms = 400) {
+  if (typeof window === 'undefined') return;
+  const ric = (window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number })
+    .requestIdleCallback;
+  if (typeof ric === 'function') {
+    ric(fn, { timeout: ms });
+  } else {
+    window.setTimeout(fn, ms);
+  }
+}
+
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [ready, setReady] = useState(false);
+  const [bootError, setBootError] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('employee');
@@ -43,6 +61,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const isPublic = PUBLIC_PATHS.includes(pathname);
 
   useEffect(() => {
+    setBootError(false);
     const u = getStoredUser();
     if (!isPublic && !u) {
       router.replace('/');
@@ -63,6 +82,13 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     setReady(true);
   }, [isPublic, router, pathname]);
 
+  // Never leave mobile on an infinite spinner if navigation stalls.
+  useEffect(() => {
+    if (isPublic || ready) return;
+    const t = window.setTimeout(() => setBootError(true), 6000);
+    return () => window.clearTimeout(t);
+  }, [isPublic, ready, pathname]);
+
   useEffect(() => {
     if (!user) return;
     setViewMode(readStoredViewMode(user));
@@ -79,30 +105,47 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!user) return;
-    api<{
-      primaryColor?: string;
-      secondaryColor?: string;
-      faviconUrl?: string | null;
-      displayName?: string;
-    }>('/studio/branding')
-      .then((b) => {
-        if (b.primaryColor) document.documentElement.style.setProperty('--brand', b.primaryColor);
-        if (b.secondaryColor) document.documentElement.style.setProperty('--brand-light', b.secondaryColor);
-        if (b.faviconUrl) {
-          let link = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
-          if (!link) {
-            link = document.createElement('link');
-            link.rel = 'icon';
-            document.head.appendChild(link);
+    deferIdle(() => {
+      api<{
+        primaryColor?: string;
+        secondaryColor?: string;
+        faviconUrl?: string | null;
+        displayName?: string;
+      }>('/studio/branding', { retries: 0, timeoutMs: 8000 })
+        .then((b) => {
+          if (b.primaryColor) document.documentElement.style.setProperty('--brand', b.primaryColor);
+          if (b.secondaryColor) document.documentElement.style.setProperty('--brand-light', b.secondaryColor);
+          if (b.faviconUrl) {
+            let link = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
+            if (!link) {
+              link = document.createElement('link');
+              link.rel = 'icon';
+              document.head.appendChild(link);
+            }
+            link.href = b.faviconUrl;
           }
-          link.href = b.faviconUrl;
-        }
-      })
-      .catch(() => undefined);
-  }, [user]);
+        })
+        .catch(() => undefined);
+    }, 800);
+  }, [user?.id]);
 
   if (isPublic) return <>{children}</>;
   if (!ready) {
+    if (bootError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-surface-muted p-4">
+          <ConnectionError
+            title="Taking too long to load"
+            message="The app shell did not finish loading. Check Wi‑Fi to the laptop, then retry."
+            onRetry={() => {
+              setBootError(false);
+              setReady(false);
+              window.location.reload();
+            }}
+          />
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen flex items-center justify-center bg-surface-muted">
         <div className="flex flex-col items-center gap-3">
@@ -132,9 +175,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
           onToggleCollapse={() => setCollapsed(!collapsed)}
           collapsed={collapsed}
         />
-        <div className="portal-content flex-1 p-4 md:p-6 lg:p-8 animate-fade-in">
-          {children}
-        </div>
+        <div className="portal-content flex-1 p-4 md:p-6 lg:p-8">{children}</div>
       </div>
       <AiChatWidget />
     </div>

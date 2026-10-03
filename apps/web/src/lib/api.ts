@@ -1,12 +1,31 @@
 export function getApiBaseUrl(): string {
-  // Browser always uses same-origin `/api/v1` (Next.js rewrites to the API).
-  // That way http://localhost:3000 and https://*.trycloudflare.com both work;
-  // never point the browser at localhost:3001 from a public URL.
+  // Browser always uses same-origin `/api/v1` (Next.js rewrites to the API on the server).
+  // Works for http://localhost:3000, http://192.168.1.69:3000, and public tunnels —
+  // never point the browser at localhost:3001 from another device.
   if (typeof window !== 'undefined') {
-    return `${window.location.origin}/api/v1`;
+    const { protocol, hostname, port, origin } = window.location;
+    if (!hostname) {
+      return 'http://192.168.1.69:3000/api/v1';
+    }
+    // Mobile UA stuck on a localhost bookmark would never reach the laptop API.
+    if (
+      (hostname === '127.0.0.1' || hostname === 'localhost') &&
+      /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)
+    ) {
+      const p = port || (protocol === 'https:' ? '443' : '80');
+      const hostPort = p === '80' || p === '443' ? '' : `:${p}`;
+      return `${protocol}//192.168.1.69${hostPort}/api/v1`;
+    }
+    return `${origin}/api/v1`;
   }
   if (process.env.API_INTERNAL_URL) return `${process.env.API_INTERNAL_URL}/api/v1`;
-  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  // Never ship a localhost NEXT_PUBLIC URL to browsers on the LAN.
+  if (
+    process.env.NEXT_PUBLIC_API_URL &&
+    !/localhost|127\.0\.0\.1/i.test(process.env.NEXT_PUBLIC_API_URL)
+  ) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
   return '/api/v1';
 }
 
@@ -72,11 +91,12 @@ export class ApiError extends Error {
   }
 }
 
-function friendlyMessage(status: number, body: { message?: string | string[] }): string {
+function friendlyMessage(status: number, body: { message?: string | string[]; requestId?: string }): string {
   const raw = body.message;
-  const apiMessage = Array.isArray(raw) ? raw.join(', ') : raw;
-  // Prefer API message for client errors (including login failures)
-  if (apiMessage && status >= 400 && status < 500) return apiMessage;
+  const apiMessage = Array.isArray(raw) ? raw.join(', ') : raw?.trim();
+  if (apiMessage && apiMessage.toLowerCase() !== 'something went wrong. please try again.') {
+    return apiMessage;
+  }
   switch (status) {
     case 400:
       return 'Invalid request.';
@@ -87,28 +107,101 @@ function friendlyMessage(status: number, body: { message?: string | string[] }):
     case 404:
       return 'Record not found.';
     case 409:
-      return apiMessage ?? 'A record with this value already exists.';
+      return 'A record with this value already exists.';
     case 503:
       return 'Server temporarily unavailable.';
     default:
-      return status >= 500 ? 'Something went wrong. Please try again.' : (apiMessage ?? 'Request failed.');
+      if (status >= 500) {
+        return body.requestId
+          ? `Server error (ref ${body.requestId}). Please try again or contact support.`
+          : 'Server error. Please try again.';
+      }
+      return apiMessage || 'Request failed.';
   }
 }
 
-export async function api<T>(
-  path: string,
-  options: RequestInit & { auth?: boolean } = {},
-): Promise<T> {
-  const { auth = true, headers, ...rest } = options;
+export type ApiOptions = RequestInit & {
+  auth?: boolean;
+  /** Extra automatic retries on transient outages. Default 1 (bounded — never infinite). */
+  retries?: number;
+  /** Per-attempt timeout in ms. Default 12000. */
+  timeoutMs?: number;
+};
+
+export function isConnectionError(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    (err.status === 0 ||
+      err.status === 502 ||
+      err.status === 503 ||
+      err.status === 504 ||
+      ((err.status === 500 || err.status === 502) &&
+        /restarting or unreachable|failed to proxy|econnrefused|internal server error/i.test(
+          err.message,
+        )) ||
+      /restarting or unreachable|unable to reach the server|failed to proxy|econnrefused|timed out/i.test(
+        err.message,
+      ))
+  );
+}
+
+export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  // Cover Nest --watch recompiles (~5–15s) without infinite loops.
+  const maxRetries = Math.max(0, Math.min(options.retries ?? 3, 4));
+  const delaysMs = [1200, 2500, 4000, 5000];
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await apiOnce<T>(path, options);
+    } catch (err) {
+      lastErr = err;
+      if (!isConnectionError(err) || attempt >= maxRetries) throw err;
+      await new Promise((r) => setTimeout(r, delaysMs[Math.min(attempt, delaysMs.length - 1)]));
+    }
+  }
+  throw lastErr;
+}
+
+async function apiOnce<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  const { auth = true, headers, retries: _retries, timeoutMs = 12_000, signal, ...rest } = options;
   const h = new Headers(headers);
-  h.set('Content-Type', 'application/json');
+  if (rest.body != null && !h.has('Content-Type')) {
+    h.set('Content-Type', 'application/json');
+  }
   if (auth) {
     const token = getToken();
     if (token) h.set('Authorization', `Bearer ${token}`);
   }
-  const res = await fetch(`${getApiBaseUrl()}${path}`, { ...rest, headers: h }).catch(() => {
-    throw new ApiError('Unable to reach the server. Please ensure the application backend is running.', 0);
-  });
+
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(`${getApiBaseUrl()}${path}`, {
+      ...rest,
+      headers: h,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new ApiError('Request timed out. Check your connection and try again.', 0);
+    }
+    throw new ApiError(
+      'Unable to reach the server. Please ensure the application backend is running.',
+      0,
+    );
+  }
+  clearTimeout(timer);
+  signal?.removeEventListener('abort', onAbort);
+
   if (!res.ok) {
     const contentType = res.headers.get('content-type') ?? '';
     let body: { message?: string | string[]; requestId?: string } = {};
@@ -116,11 +209,16 @@ export async function api<T>(
       body = (await res.json().catch(() => ({}))) as typeof body;
     } else {
       const text = await res.text().catch(() => '');
-      if (/internal server error/i.test(text)) {
-        throw new ApiError('Server error. Please refresh the page or try again shortly.', res.status);
+      if (/internal server error|econnrefused|failed to proxy/i.test(text)) {
+        throw new ApiError(
+          'Backend is restarting or unreachable. Wait a few seconds, then refresh.',
+          res.status,
+        );
+      }
+      if (text.trim()) {
+        throw new ApiError(text.slice(0, 300), res.status);
       }
     }
-    // Do not wipe session on unauthenticated calls (e.g. failed login)
     if (res.status === 401 && auth && typeof window !== 'undefined') {
       clearSession();
       if (window.location.pathname !== '/') {

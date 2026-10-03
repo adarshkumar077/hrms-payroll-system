@@ -54,13 +54,12 @@ async function bootstrap() {
           host.endsWith('.ngrok-free.app') ||
           host.endsWith('.ngrok.io');
         if (isLoopback || isQuickTunnel) return callback(null, true);
-        if (!isProd) {
-          const isLocalLan =
-            /^192\.168\.\d+\.\d+$/.test(host) ||
-            /^10\.\d+\.\d+\.\d+$/.test(host) ||
-            /^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+$/.test(host);
-          if (isLocalLan) return callback(null, true);
-        }
+        // Always allow private LAN origins so phones on Wi‑Fi can use http://192.168.x.x:3000
+        const isLocalLan =
+          /^192\.168\.\d+\.\d+$/.test(host) ||
+          /^10\.\d+\.\d+\.\d+$/.test(host) ||
+          /^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+$/.test(host);
+        if (isLocalLan) return callback(null, true);
       } catch {
         /* ignore */
       }
@@ -90,6 +89,7 @@ async function bootstrap() {
   const port = config.get<number>('API_PORT', 3001);
   await app.listen(port, '0.0.0.0');
   console.log(`API listening on http://0.0.0.0:${port}/${prefix}`);
+  console.log(`LAN health: http://192.168.1.69:${port}/${prefix}/health`);
   console.log(`Health: http://127.0.0.1:${port}/${prefix}/health`);
   console.log(`Swagger at http://localhost:${port}/api/docs`);
 }

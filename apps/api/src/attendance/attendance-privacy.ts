@@ -1,4 +1,4 @@
-/** Attendance photo/GPS visibility and 10 PM system-logout helpers. */
+/** Attendance photo/GPS visibility and 9:00 PM auto-checkout helpers. */
 
 export const CHECK_OUT_SOURCE = {
   MANUAL_OUT: 'MANUAL_OUT',
@@ -9,7 +9,8 @@ export const CHECK_OUT_SOURCE = {
 export type CheckOutSource = (typeof CHECK_OUT_SOURCE)[keyof typeof CHECK_OUT_SOURCE];
 
 export const COMPANY_TZ = 'Asia/Kolkata';
-export const SYSTEM_LOGOUT_HOUR = 22;
+/** Auto checkout hour in Asia/Kolkata (21:00). */
+export const SYSTEM_LOGOUT_HOUR = 21;
 
 const GEO_RECORD_FIELDS = [
   'latitude',
@@ -37,7 +38,7 @@ const GEO_PUNCH_FIELDS = [
 ] as const;
 
 export function checkOutSourceLabel(source?: string | null): string | null {
-  if (source === CHECK_OUT_SOURCE.SYSTEM_LOGOUT) return 'System Logout';
+  if (source === CHECK_OUT_SOURCE.SYSTEM_LOGOUT) return 'Auto Checkout';
   if (source === CHECK_OUT_SOURCE.MANUAL_OUT) return 'Manual OUT';
   if (source === CHECK_OUT_SOURCE.HR_MANUAL) return 'Manual (HR)';
   return null;
@@ -52,22 +53,27 @@ export function dateKeyInTz(d: Date, timeZone = COMPANY_TZ): string {
   }).format(d);
 }
 
-/** 22:00 Asia/Kolkata on the given YYYY-MM-DD calendar date. */
-export function tenPmUtcForDateKey(dateKey: string): Date {
-  return new Date(`${dateKey}T16:30:00.000Z`);
+/**
+ * 21:00 Asia/Kolkata on the given YYYY-MM-DD calendar date (= 15:30 UTC).
+ */
+export function autoCheckoutUtcForDateKey(dateKey: string): Date {
+  return new Date(`${dateKey}T15:30:00.000Z`);
 }
 
+/** @deprecated Use autoCheckoutUtcForDateKey — kept for older imports/tests. */
+export const tenPmUtcForDateKey = autoCheckoutUtcForDateKey;
+
 /**
- * First 10:00 PM Asia/Kolkata strictly after check-in if already past 10 PM
- * that calendar day; otherwise 10 PM on the check-in calendar day.
+ * First 9:00 PM Asia/Kolkata strictly after check-in if already past 9 PM
+ * that calendar day; otherwise 9 PM on the check-in calendar day.
  */
 export function nextSystemLogoutAt(checkInAt: Date): Date {
   const key = dateKeyInTz(checkInAt);
-  const tenPm = tenPmUtcForDateKey(key);
-  if (checkInAt.getTime() < tenPm.getTime()) return tenPm;
+  const ninePm = autoCheckoutUtcForDateKey(key);
+  if (checkInAt.getTime() < ninePm.getTime()) return ninePm;
   const [y, m, d] = key.split('-').map(Number);
   const next = new Date(Date.UTC(y, m - 1, d + 1));
-  return tenPmUtcForDateKey(next.toISOString().slice(0, 10));
+  return autoCheckoutUtcForDateKey(next.toISOString().slice(0, 10));
 }
 
 export function isDueForSystemLogout(checkInAt: Date, now: Date): boolean {

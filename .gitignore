@@ -13,6 +13,7 @@ uploads/
 .DS_Store
 Thumbs.db
 apps/api/prisma/*.db
+apps/api/prisma/backups/
 apps/mobile/android/
 apps/mobile/ios/
 *.apk

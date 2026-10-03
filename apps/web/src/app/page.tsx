@@ -13,6 +13,7 @@ export default function LoginPage() {
   const [mode, setMode] = useState<LoginMode>('password');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [mobile, setMobile] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
@@ -35,9 +36,23 @@ export default function LoginPage() {
   }, [router]);
 
   useEffect(() => {
-    api<{ needsSetup: boolean }>('/auth/setup/status', { auth: false })
-      .then((res) => setNeedsSetup(res.needsSetup))
-      .catch(() => setNeedsSetup(false));
+    // Show login form immediately; refine setup mode in background.
+    setNeedsSetup(false);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 3000);
+    api<{ needsSetup: boolean }>('/auth/setup/status', {
+      auth: false,
+      retries: 0,
+      timeoutMs: 3000,
+      signal: controller.signal,
+    })
+      .then((res) => setNeedsSetup(Boolean(res.needsSetup)))
+      .catch(() => setNeedsSetup(false))
+      .finally(() => window.clearTimeout(timeout));
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, []);
 
   async function onSetupSuperAdmin(e: React.FormEvent) {
@@ -245,10 +260,6 @@ export default function LoginPage() {
               : 'Sign in to access your workspace'}
           </p>
 
-          {needsSetup === null && (
-            <p className="text-sm text-ink/60">Checking system status…</p>
-          )}
-
           {needsSetup && (
             <form onSubmit={onSetupSuperAdmin} className="card p-6 space-y-4">
               <label className="block">
@@ -339,17 +350,45 @@ export default function LoginPage() {
                   required
                   minLength={3}
                   autoComplete="username"
-                  placeholder="admin, hr001, or emp001"
+                  placeholder="admin@eitf.in"
                 />
                 <p className="text-xs text-ink-400 mt-1.5">
-                  Use User ID (<strong>admin</strong>, <strong>hr001</strong>, <strong>emp001</strong>),
-                  employee code (<strong>ADM001</strong>, <strong>HR001</strong>, <strong>EMP001</strong>),
-                  or email.
+                  Use your User ID, employee code, or email address.
                 </p>
               </label>
               <label className="block">
                 <span className="text-sm font-medium text-ink-700">Password</span>
-                <input className="input mt-1.5" value={password} onChange={(e) => setPassword(e.target.value)} type="password" required />
+                <div className="relative mt-1.5">
+                  <input
+                    className="input w-full pr-11"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-ink-400 hover:text-ink-700"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    tabIndex={-1}
+                  >
+                    {showPassword ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-5 h-5" aria-hidden>
+                        <path d="M3 3l18 18" />
+                        <path d="M10.6 10.6a2 2 0 002.8 2.8" />
+                        <path d="M9.9 5.1A9.8 9.8 0 0112 5c5 0 9.3 3.1 11 7.5a11.6 11.6 0 01-1.7 2.9" />
+                        <path d="M6.1 6.1A11.3 11.3 0 001 12.5C2.7 16.9 7 20 12 20a10 10 0 005.1-1.4" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-5 h-5" aria-hidden>
+                        <path d="M1 12.5C2.7 8.1 7 5 12 5s9.3 3.1 11 7.5c-1.7 4.4-6 7.5-11 7.5S2.7 16.9 1 12.5z" />
+                        <circle cx="12" cy="12.5" r="3" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
               </label>
               <label className="block">
                 <span className="text-sm font-medium text-ink-700">2FA code <span className="text-ink-400 font-normal">(optional)</span></span>
@@ -394,14 +433,6 @@ export default function LoginPage() {
           >
             Clear local session
           </button>
-          {process.env.NODE_ENV !== 'production' && (
-            <div className="mt-4 text-xs text-ink-500 bg-white/80 border border-ink-100 rounded-xl px-3 py-2.5 space-y-1">
-              <p className="font-medium text-ink-700">Demo accounts</p>
-              <p>Admin — <span className="font-mono">admin</span> / Admin@123</p>
-              <p>HR — <span className="font-mono">hr001</span> / HR@123</p>
-              <p>Employee — <span className="font-mono">emp001</span> / Emp@123</p>
-            </div>
-          )}
           </>
           )}
         </div>

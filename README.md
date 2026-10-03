@@ -27,8 +27,8 @@ npm run start:localhost
 
 | Service | URL |
 |---|---|
-| Web (local) | http://localhost:3000 |
-| Web (LAN) | http://192.168.1.69:3000 |
+| Web (local HTTPS) | https://localhost:3000 |
+| Web (LAN HTTPS — GPS) | https://192.168.1.69:3000 |
 | Web (public) | URL printed by `start:localhost` / `.public-url.txt` |
 | API health | http://localhost:3001/api/v1/health |
 | Swagger | http://localhost:3001/api/docs |
@@ -46,16 +46,13 @@ npm run db:seed
 
 ## Login (after seed)
 
-After `npm run db:seed`:
+After `npm run db:seed` (empty DB only — seed never wipes existing users):
 
-| User | Password |
-|---|---|
-| `superadmin` | `Super@123` |
-| `admin` | `Admin@123` |
-| `hr001` | `HR@123` |
-| `emp001` | `Emp@123` |
+| User | Password | Role |
+|---|---|---|
+| `admin@eitf.in` | `Admin@123` | Super Admin |
 
-If no Super Admin exists yet, open http://localhost:3000 and use **Initial Super Admin Setup**, or run `apps/api` bootstrap with `SETUP_SUPER_ADMIN_*` env vars. Only an existing Super Admin can create HR accounts (Security → Admin Users or `POST /auth/admin-users`).
+Seed does **not** create demo Admin/HR/Employee accounts. Create real users from the app (Admin Users).
 
 ## Documentation pack (Phase 13)
 

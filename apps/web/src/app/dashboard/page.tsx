@@ -3,12 +3,14 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, getStoredUser, SessionUser } from '@/lib/api';
+import { api, getStoredUser, SessionUser, isConnectionError } from '@/lib/api';
 import { isAdmin, isCeo } from '@/lib/roles';
 import { Card } from '@/components/ui/Card';
 import { NavIconSvg } from '@/components/ui/Icons';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { ConnectionError } from '@/components/ui/ConnectionError';
 import { EmployeeSalaryTracker } from '@/components/employees/EmployeeSalaryTracker';
+import { onAttendanceChanged } from '@/lib/attendance-sync';
 
 type EmpDash = {
   monthAttendanceDays?: number;
@@ -18,6 +20,15 @@ type EmpDash = {
   loanOutstanding?: number;
   latestPayslip?: { netPay: number; year: number; month: number } | null;
   activeGoals?: number;
+  earnings?: {
+    monthsOfService: number;
+    plEligible: boolean;
+    plStatus: string;
+    dailySalary: number;
+    monthlySalary: number;
+    todaysEarnings: number | null;
+    todayStatus: string | null;
+  };
 };
 
 type HrDash = {
@@ -201,43 +212,90 @@ export default function DashboardPage() {
     const ceoRole = ['SUPER_ADMIN', 'HR', 'ADMIN'].some((x) => u.roles.includes(x));
     const ceoAi = ['SUPER_ADMIN', 'HR'].some((x) => u.roles.includes(x));
     const payrollAi = ['SUPER_ADMIN', 'HR', 'ADMIN'].some((x) => u.roles.includes(x));
-    Promise.allSettled([
-      admin ? api<HrDash>('/dashboard/hr') : api<EmpDash>('/dashboard/employee'),
-      admin && ceoRole ? api<CeoDash>('/dashboard/ceo') : Promise.resolve(null),
-      api<Announcement[]>('/announcements'),
-      admin ? api<any[]>('/approvals/pending').catch(() => []) : Promise.resolve([]),
-      admin ? api<any[]>(`/security/audit?limit=10`).catch(() => []) : api<any[]>('/notifications/mine').catch(() => []),
-      api<any[]>('/me/documents').catch(() => []),
-      api<any[]>(`/leave/calendar?from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}`).catch(() => []),
-      ceoAi ? api<AiPredictions>('/ai/predictions').catch(() => null) : Promise.resolve(null),
-      ceoAi ? api<AiPerformanceInsights>('/ai/performance/insights').catch(() => null) : Promise.resolve(null),
-      payrollAi
-        ? api<AiPayrollAnomalies>(`/ai/payroll/anomalies?year=${r.year}&month=${r.month}`).catch(() => null)
-        : Promise.resolve(null),
-    ]).then((results) => {
-      const [a, b, c, d, e, f, g, i, j, k] = results;
 
-      if (a.status === 'fulfilled') {
-        if (admin) setHr(a.value as HrDash);
-        else setEmp(a.value as EmpDash);
-      }
-      if (b.status === 'fulfilled' && b.value) setCeo(b.value as CeoDash);
-      if (c.status === 'fulfilled') setAnnouncements(c.value ?? []);
-      if (d.status === 'fulfilled') setPendingApprovals(d.value ?? []);
-      if (e.status === 'fulfilled') {
-        const raw = e.value as unknown;
-        if (Array.isArray(raw)) setAudit(raw);
-        else if (raw && typeof raw === 'object' && Array.isArray((raw as { rows?: unknown[] }).rows)) {
-          setAudit((raw as { rows: any[] }).rows);
-        } else setAudit([]);
-      }
-      if (f.status === 'fulfilled') setDocs(f.value ?? []);
-      if (g.status === 'fulfilled') setLeaveCalendar(g.value ?? []);
-      if (i.status === 'fulfilled') setAiPred(i.value as AiPredictions | null);
-      if (j.status === 'fulfilled') setAiPerf(j.value as AiPerformanceInsights | null);
-      if (k.status === 'fulfilled') setAiPayroll(k.value as AiPayrollAnomalies | null);
-    }).catch(() => undefined).finally(() => setLoading(false));
+    // Critical path — paint dashboard KPIs ASAP on mobile LAN.
+    Promise.allSettled([
+      admin
+        ? api<HrDash>('/dashboard/hr', { timeoutMs: 10000 })
+        : api<EmpDash>('/dashboard/employee', { timeoutMs: 10000 }),
+      admin && ceoRole ? api<CeoDash>('/dashboard/ceo', { timeoutMs: 10000 }) : Promise.resolve(null),
+      api<Announcement[]>('/announcements', { retries: 0, timeoutMs: 8000 }),
+    ])
+      .then((results) => {
+        const [a, b, c] = results;
+        if (a.status === 'fulfilled') {
+          if (admin) setHr(a.value as HrDash);
+          else setEmp(a.value as EmpDash);
+        } else if (a.status === 'rejected') {
+          const reason = a.reason;
+          setError(
+            isConnectionError(reason)
+              ? 'Unable to reach the server on this network. Check Wi‑Fi and retry.'
+              : reason instanceof Error
+                ? reason.message
+                : 'Dashboard failed to load',
+          );
+        }
+        if (b.status === 'fulfilled' && b.value) setCeo(b.value as CeoDash);
+        if (c.status === 'fulfilled') setAnnouncements(c.value ?? []);
+      })
+      .finally(() => setLoading(false));
+
+    // Secondary widgets — load after first paint (do not block UI).
+    const defer = window.setTimeout(() => {
+      Promise.allSettled([
+        admin ? api<any[]>('/approvals/pending', { retries: 0 }).catch(() => []) : Promise.resolve([]),
+        admin
+          ? api<any[]>(`/security/audit?limit=10`, { retries: 0 }).catch(() => [])
+          : api<any[]>('/notifications/mine', { retries: 0 }).catch(() => []),
+        api<any[]>('/me/documents', { retries: 0 }).catch(() => []),
+        api<any[]>(
+          `/leave/calendar?from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}`,
+          { retries: 0 },
+        ).catch(() => []),
+        ceoAi ? api<AiPredictions>('/ai/predictions', { retries: 0 }).catch(() => null) : Promise.resolve(null),
+        ceoAi
+          ? api<AiPerformanceInsights>('/ai/performance/insights', { retries: 0 }).catch(() => null)
+          : Promise.resolve(null),
+        payrollAi
+          ? api<AiPayrollAnomalies>(`/ai/payroll/anomalies?year=${r.year}&month=${r.month}`, {
+              retries: 0,
+            }).catch(() => null)
+          : Promise.resolve(null),
+      ]).then((results) => {
+        const [d, e, f, g, i, j, k] = results;
+        if (d.status === 'fulfilled') setPendingApprovals(d.value ?? []);
+        if (e.status === 'fulfilled') {
+          const raw = e.value as unknown;
+          if (Array.isArray(raw)) setAudit(raw);
+          else if (raw && typeof raw === 'object' && Array.isArray((raw as { rows?: unknown[] }).rows)) {
+            setAudit((raw as { rows: any[] }).rows);
+          } else setAudit([]);
+        }
+        if (f.status === 'fulfilled') setDocs(f.value ?? []);
+        if (g.status === 'fulfilled') setLeaveCalendar(g.value ?? []);
+        if (i.status === 'fulfilled') setAiPred(i.value as AiPredictions | null);
+        if (j.status === 'fulfilled') setAiPerf(j.value as AiPerformanceInsights | null);
+        if (k.status === 'fulfilled') setAiPayroll(k.value as AiPayrollAnomalies | null);
+      });
+    }, 50);
+
+    return () => window.clearTimeout(defer);
   }, [router]);
+
+  useEffect(() => {
+    return onAttendanceChanged(() => {
+      const u = getStoredUser();
+      if (!u) return;
+      const admin = isAdmin(u);
+      api(admin ? '/dashboard/hr' : '/dashboard/employee')
+        .then((v) => {
+          if (admin) setHr(v as HrDash);
+          else setEmp(v as EmpDash);
+        })
+        .catch(() => undefined);
+    });
+  }, []);
 
   const month = monthRange(new Date());
 
@@ -428,9 +486,11 @@ export default function DashboardPage() {
       </section>
 
       {error && (
-        <div className="text-sm text-danger bg-danger-light/50 rounded-xl px-4 py-2 border border-danger-light/70">
-          {error}
-        </div>
+        <ConnectionError
+          title="Could not load dashboard"
+          message={error}
+          onRetry={() => window.location.reload()}
+        />
       )}
 
       {loading && (
@@ -967,9 +1027,25 @@ export default function DashboardPage() {
               <p className="text-sm text-ink-500 mt-2">Days recorded this month</p>
             </Card>
             <Card className="p-6">
-              <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">Leave balance</p>
-              <p className="font-display text-3xl font-bold text-ink-900 mt-3">{emp?.leaveBalances?.[0]?.available ?? 0}</p>
-              <p className="text-sm text-ink-500 mt-2">{emp?.leaveBalances?.[0]?.code ? `${emp.leaveBalances[0].code} available` : '—'}</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">Today&apos;s Earnings</p>
+              <p className="font-display text-3xl font-bold text-ink-900 mt-3">
+                {emp?.earnings?.todaysEarnings != null
+                  ? formatCurrency(emp.earnings.todaysEarnings)
+                  : '—'}
+              </p>
+              <p className="text-sm text-ink-500 mt-2">
+                Daily {emp?.earnings?.dailySalary != null ? formatCurrency(emp.earnings.dailySalary) : '—'} · Monthly{' '}
+                {emp?.earnings?.monthlySalary != null ? formatCurrency(emp.earnings.monthlySalary) : '—'}
+              </p>
+            </Card>
+            <Card className="p-6">
+              <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">PL eligibility</p>
+              <p className="font-display text-2xl font-bold text-ink-900 mt-3">
+                {emp?.earnings?.plEligible ? 'Eligible' : 'Locked'}
+              </p>
+              <p className="text-sm text-ink-500 mt-2">
+                {emp?.earnings?.plStatus ?? 'Completes after 7 months of service'}
+              </p>
             </Card>
             <Card className="p-6">
               <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">Latest payslip</p>
@@ -979,13 +1055,6 @@ export default function DashboardPage() {
               <p className="text-sm text-ink-500 mt-2">
                 {emp?.latestPayslip ? `${emp.latestPayslip.month}/${emp.latestPayslip.year}` : 'Generate payroll to view'}
               </p>
-            </Card>
-            <Card className="p-6">
-              <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">Assigned work</p>
-              <p className="font-display text-3xl font-bold text-ink-900 mt-3">
-                {(emp?.activeGoals ?? 0) + (emp?.openTickets ?? 0)}
-              </p>
-              <p className="text-sm text-ink-500 mt-2">Open goals + active tickets</p>
             </Card>
           </section>
 

@@ -22,6 +22,8 @@ import {
 } from './dto/admin.dto';
 
 import { parseUserAgent } from '../common/ua.util';
+
+@Injectable()
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,

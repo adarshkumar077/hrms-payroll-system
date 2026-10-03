@@ -28,7 +28,8 @@ const ip = lanIp();
 console.log('\n--- EITF HRMS (Attendance & Payroll) ---');
 console.log(`Local:   http://localhost:3000`);
 console.log(`Network: http://${ip}:3000`);
-console.log('Login: superadmin / Super@123');
+console.log(`API LAN: http://${ip}:3001/api/v1/health`);
+console.log('Login: admin@eitf.in / Admin@123');
 console.log('Keep this terminal open. Ctrl+C to stop.\n');
 
 function shutdown() {

@@ -1,6 +1,12 @@
 /** Primary Super Admin identities that must never be downgraded by non-super users. */
-export const PROTECTED_SUPER_ADMIN_LOGIN_IDS = new Set(['SUPERADMIN', 'superadmin']);
-export const PROTECTED_SUPER_ADMIN_EMAILS = new Set(['superadmin@company.com']);
+export const PROTECTED_SUPER_ADMIN_LOGIN_IDS = new Set([
+  'admin@eitf.in',
+  'superadmin',
+]);
+export const PROTECTED_SUPER_ADMIN_EMAILS = new Set([
+  'admin@eitf.in',
+  'superadmin@company.com',
+]);
 
 export function isProtectedSuperAdminLoginId(loginId?: string | null): boolean {
   if (!loginId) return false;

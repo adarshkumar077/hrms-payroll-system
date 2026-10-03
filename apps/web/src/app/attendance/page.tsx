@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, getStoredUser, getToken, getApiBaseUrl } from '@/lib/api';
 import { canManageAttendance } from '@/lib/roles';
+import { notifyAttendanceChanged, onAttendanceChanged } from '@/lib/attendance-sync';
 
 type Row = {
   employee: {
@@ -169,13 +170,18 @@ function AttendanceConsoleInner() {
   const [editNote, setEditNote] = useState('');
   const [saving, setSaving] = useState(false);
 
-  function load(d = date) {
-    api<Row[]>(`/attendance/console?date=${d}`)
-      .then(setRows)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed'));
-    api<typeof counters>('/attendance/counters')
-      .then(setCounters)
-      .catch(() => setCounters([]));
+  async function load(d = date) {
+    setError('');
+    try {
+      const [nextRows, nextCounters] = await Promise.all([
+        api<Row[]>(`/attendance/console?date=${d}`),
+        api<typeof counters>('/attendance/counters').catch(() => [] as typeof counters),
+      ]);
+      setRows(nextRows);
+      setCounters(nextCounters);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load attendance');
+    }
   }
 
   async function openDetail(employeeId: string, d: string) {
@@ -203,24 +209,30 @@ function AttendanceConsoleInner() {
       return;
     }
     setCanManage(canManageAttendance(u));
-    load();
+    void load();
     const empId = searchParams.get('employeeId');
     const d = searchParams.get('date');
     if (empId && d) {
-      openDetail(empId, d);
+      void openDetail(empId, d);
     }
+    return onAttendanceChanged(() => {
+      void load(date);
+      if (detail?.employee.id) void openDetail(detail.employee.id, detail.date);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   async function correct(employeeId: string, status: string) {
     setMessage('');
+    setError('');
     try {
       await api(`/attendance/${employeeId}/${date}`, {
         method: 'PUT',
         body: JSON.stringify({ status, correctionNote: `Manual set to ${status}` }),
       });
       setMessage('Corrected');
-      load();
+      notifyAttendanceChanged({ employeeId, date, source: 'console-correct' });
+      await load();
       if (detail?.employee.id === employeeId) await openDetail(employeeId, date);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Correction failed');
@@ -244,7 +256,12 @@ function AttendanceConsoleInner() {
         }),
       });
       setMessage('Attendance updated');
-      load(detail.date);
+      notifyAttendanceChanged({
+        employeeId: detail.employee.id,
+        date: detail.date,
+        source: 'console-save',
+      });
+      await load(detail.date);
       await openDetail(detail.employee.id, detail.date);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Update failed');
@@ -270,7 +287,12 @@ function AttendanceConsoleInner() {
         }),
       });
       setMessage(`Marked ${punchType}`);
-      load(detail.date);
+      notifyAttendanceChanged({
+        employeeId: detail.employee.id,
+        date: detail.date,
+        source: `console-${punchType}`,
+      });
+      await load(detail.date);
       await openDetail(detail.employee.id, detail.date);
     } catch (e) {
       setError(e instanceof Error ? e.message : `Mark ${punchType} failed`);
@@ -622,7 +644,7 @@ function AttendanceConsoleInner() {
                         }}
                       >
                         <option value="">Set…</option>
-                        {['P', 'A', 'HD', 'L', 'WFH', 'OD', 'WO', 'H', 'ULOB', 'PL'].map((s) => (
+                        {['P', 'A', 'HD', 'L', 'WFH', 'OD', 'WO', 'H', 'PH', 'ULOB', 'PL'].map((s) => (
                           <option key={s} value={s}>
                             {s}
                           </option>
@@ -778,7 +800,7 @@ function AttendanceConsoleInner() {
                     value={editStatus}
                     onChange={(e) => setEditStatus(e.target.value)}
                   >
-                    {['P', 'A', 'HD', 'L', 'WFH', 'OD', 'WO', 'H', 'ULOB', 'PL'].map((s) => (
+                    {['P', 'A', 'HD', 'L', 'WFH', 'OD', 'WO', 'H', 'PH', 'ULOB', 'PL'].map((s) => (
                       <option key={s} value={s}>
                         {s}
                       </option>

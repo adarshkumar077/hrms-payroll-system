@@ -38,7 +38,7 @@ export const DEFAULT_COMPANY_SETTINGS: SettingDef[] = [
   { key: 'esd.interest_rate_annual', label: 'ESD annual interest rate %', group: 'esd', value: 0 },
 
   // Leave accrual
-  { key: 'leave.probation_months', label: 'Leave probation (months)', group: 'leave', value: 6 },
+  { key: 'leave.probation_months', label: 'Leave probation (months)', group: 'leave', value: 7 },
   { key: 'leave.credit_at_probation_end', label: 'Leave days at probation end', group: 'leave', value: 6 },
   { key: 'leave.monthly_credit_after', label: 'Monthly leave credit after probation', group: 'leave', value: 1 },
   { key: 'leave.carry_forward_enabled', label: 'Leave carry-forward enabled', group: 'leave', value: true },

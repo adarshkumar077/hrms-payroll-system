@@ -6,7 +6,7 @@ import {
   isDueForSystemLogout,
   nextSystemLogoutAt,
   sanitizeAttendanceRecord,
-  tenPmUtcForDateKey,
+  autoCheckoutUtcForDateKey,
 } from './attendance-privacy';
 
 describe('attendance privacy sanitization', () => {
@@ -77,33 +77,33 @@ describe('attendance privacy sanitization', () => {
     assert.equal(out.checkOutLabel, 'Manual OUT');
   });
 
-  it('labels SYSTEM LOGOUT for both employee and privileged views', () => {
+  it('labels AUTO CHECKOUT for both employee and privileged views', () => {
     const rec = { ...sample, checkOutSource: CHECK_OUT_SOURCE.SYSTEM_LOGOUT };
-    assert.equal(sanitizeAttendanceRecord(rec, false).checkOutLabel, 'System Logout');
-    assert.equal(sanitizeAttendanceRecord(rec, true).checkOutLabel, 'System Logout');
-    assert.equal(checkOutSourceLabel(CHECK_OUT_SOURCE.SYSTEM_LOGOUT), 'System Logout');
+    assert.equal(sanitizeAttendanceRecord(rec, false).checkOutLabel, 'Auto Checkout');
+    assert.equal(sanitizeAttendanceRecord(rec, true).checkOutLabel, 'Auto Checkout');
+    assert.equal(checkOutSourceLabel(CHECK_OUT_SOURCE.SYSTEM_LOGOUT), 'Auto Checkout');
   });
 });
 
-describe('system logout schedule (Asia/Kolkata)', () => {
-  it('uses 16:30 UTC for 10:00 PM IST', () => {
-    const t = tenPmUtcForDateKey('2026-09-08');
-    assert.equal(t.toISOString(), '2026-09-08T16:30:00.000Z');
+describe('auto checkout schedule (Asia/Kolkata 9:00 PM)', () => {
+  it('uses 15:30 UTC for 9:00 PM IST', () => {
+    const t = autoCheckoutUtcForDateKey('2026-09-08');
+    assert.equal(t.toISOString(), '2026-09-08T15:30:00.000Z');
   });
 
-  it('schedules 10 PM same day when checked in before 10 PM', () => {
+  it('schedules 9 PM same day when checked in before 9 PM', () => {
     // 9:00 AM IST = 03:30 UTC
     const checkIn = new Date('2026-09-08T03:30:00.000Z');
-    assert.equal(nextSystemLogoutAt(checkIn).toISOString(), '2026-09-08T16:30:00.000Z');
-    assert.equal(isDueForSystemLogout(checkIn, new Date('2026-09-08T16:29:59.000Z')), false);
-    assert.equal(isDueForSystemLogout(checkIn, new Date('2026-09-08T16:30:00.000Z')), true);
+    assert.equal(nextSystemLogoutAt(checkIn).toISOString(), '2026-09-08T15:30:00.000Z');
+    assert.equal(isDueForSystemLogout(checkIn, new Date('2026-09-08T15:29:59.000Z')), false);
+    assert.equal(isDueForSystemLogout(checkIn, new Date('2026-09-08T15:30:00.000Z')), true);
   });
 
-  it('schedules next-day 10 PM when checked in after 10 PM', () => {
-    // 10:30 PM IST = 17:00 UTC
-    const checkIn = new Date('2026-09-08T17:00:00.000Z');
-    assert.equal(nextSystemLogoutAt(checkIn).toISOString(), '2026-09-09T16:30:00.000Z');
-    assert.equal(isDueForSystemLogout(checkIn, new Date('2026-09-08T17:05:00.000Z')), false);
-    assert.equal(isDueForSystemLogout(checkIn, new Date('2026-09-09T16:30:00.000Z')), true);
+  it('schedules next-day 9 PM when checked in after 9 PM', () => {
+    // 9:30 PM IST = 16:00 UTC
+    const checkIn = new Date('2026-09-08T16:00:00.000Z');
+    assert.equal(nextSystemLogoutAt(checkIn).toISOString(), '2026-09-09T15:30:00.000Z');
+    assert.equal(isDueForSystemLogout(checkIn, new Date('2026-09-08T16:05:00.000Z')), false);
+    assert.equal(isDueForSystemLogout(checkIn, new Date('2026-09-09T15:30:00.000Z')), true);
   });
 });
