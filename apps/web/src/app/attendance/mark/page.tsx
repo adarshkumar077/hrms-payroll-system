@@ -565,6 +565,7 @@ export default function MarkAttendancePage() {
       setCaptureMode(null);
       pendingPunchRef.current = null;
       notifyAttendanceChanged({
+        employeeId: getStoredUser()?.employeeId ?? undefined,
         date: todayKeyLocal(),
         source: punchType === 'IN' ? 'mark-in' : 'mark-out',
       });

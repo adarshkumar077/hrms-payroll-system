@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Suspense, useEffect, useState, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, getStoredUser, getToken, getApiBaseUrl } from '@/lib/api';
-import { canManageAttendance } from '@/lib/roles';
+import { canManageAttendance, canUpdateAttendance } from '@/lib/roles';
 import { notifyAttendanceChanged, onAttendanceChanged } from '@/lib/attendance-sync';
 
 type Row = {
@@ -164,6 +164,7 @@ function AttendanceConsoleInner() {
   const [detail, setDetail] = useState<RecordDetail | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [canManage, setCanManage] = useState(false);
+  const [canUpdate, setCanUpdate] = useState(false);
   const [editStatus, setEditStatus] = useState('P');
   const [editIn, setEditIn] = useState('');
   const [editOut, setEditOut] = useState('');
@@ -209,6 +210,7 @@ function AttendanceConsoleInner() {
       return;
     }
     setCanManage(canManageAttendance(u));
+    setCanUpdate(canUpdateAttendance(u));
     void load();
     const empId = searchParams.get('employeeId');
     const d = searchParams.get('date');
@@ -240,20 +242,27 @@ function AttendanceConsoleInner() {
   }
 
   async function saveCorrection() {
-    if (!detail || !canManage) return;
+    if (!detail || !canUpdate) return;
     setSaving(true);
     setMessage('');
     setError('');
     try {
+      // Status/note always; punch times only when HR/Super Admin fills them.
+      // Never send selfie/location/method so original capture data is preserved.
+      const body: Record<string, unknown> = {
+        status: editStatus,
+        correctionNote:
+          editNote.trim() || `Attendance updated to ${editStatus} by Admin/HR/Super Admin`,
+      };
+      if (canManage) {
+        const inIso = datetimeLocalToIso(editIn);
+        const outIso = datetimeLocalToIso(editOut);
+        if (inIso) body.checkInAt = inIso;
+        if (outIso) body.checkOutAt = outIso;
+      }
       await api(`/attendance/${detail.employee.id}/${detail.date}`, {
         method: 'PUT',
-        body: JSON.stringify({
-          status: editStatus,
-          checkInAt: datetimeLocalToIso(editIn),
-          checkOutAt: datetimeLocalToIso(editOut),
-          correctionNote: editNote.trim() || `HR/Super Admin correction to ${editStatus}`,
-          method: 'MANUAL',
-        }),
+        body: JSON.stringify(body),
       });
       setMessage('Attendance updated');
       notifyAttendanceChanged({
@@ -404,9 +413,10 @@ function AttendanceConsoleInner() {
       <h1 className="font-display text-3xl text-brand-700 mt-2">Attendance Console</h1>
       <p className="text-sm text-ink/60 mb-4">
         Daily grid · late marks · ULOB counters
-        {canManage
-          ? ' · HR / Super Admin can mark, edit, and correct any employee'
+        {canUpdate
+          ? ' · Admin / HR / Super Admin can Edit / Update Attendance'
           : ' · view only'}
+        {canManage ? ' · HR / Super Admin can also Mark IN/OUT' : ''}
       </p>
 
       <div className="flex flex-wrap gap-3 mb-4 text-sm">
@@ -546,7 +556,7 @@ function AttendanceConsoleInner() {
               <th className="px-3 py-2">Out</th>
               <th className="px-3 py-2">OUT source</th>
               <th className="px-3 py-2">Late</th>
-              <th className="px-3 py-2">Correct</th>
+              <th className="px-3 py-2">Edit / Update</th>
             </tr>
           </thead>
           <tbody>
@@ -634,16 +644,17 @@ function AttendanceConsoleInner() {
                     {r.record?.isLate ? `${r.record.lateMinutes}m` : '—'}
                   </td>
                   <td className="px-3 py-2">
-                    {canManage ? (
+                    {canUpdate ? (
                       <select
                         className="text-xs border border-mist rounded px-1 py-1"
                         defaultValue=""
+                        aria-label="Edit / Update Attendance"
                         onChange={(e) => {
                           if (e.target.value) correct(r.employee.id, e.target.value);
                           e.target.value = '';
                         }}
                       >
-                        <option value="">Set…</option>
+                        <option value="">Edit…</option>
                         {['P', 'A', 'HD', 'L', 'WFH', 'OD', 'WO', 'H', 'PH', 'ULOB', 'PL'].map((s) => (
                           <option key={s} value={s}>
                             {s}
@@ -786,11 +797,13 @@ function AttendanceConsoleInner() {
           ) : (
             <p className="text-sm text-ink/50">No record for this date</p>
           )}
-          {canManage && (
+          {canUpdate && (
             <div className="mt-4 pt-4 border-t border-mist space-y-3">
-              <p className="font-medium text-sm text-brand-700">Mark / edit / correct</p>
+              <p className="font-medium text-sm text-brand-700">Edit / Update Attendance</p>
               <p className="text-xs text-ink/50">
-                Changes are written to the audit log. Employees cannot edit these fields.
+                Updates the existing record (no duplicate). Original photo, location, and punch
+                times are kept unless HR/Super Admin changes times below. Audit log records every
+                change.
               </p>
               <div className="grid sm:grid-cols-2 gap-3 text-sm">
                 <label className="flex flex-col gap-1">
@@ -808,7 +821,7 @@ function AttendanceConsoleInner() {
                   </select>
                 </label>
                 <label className="flex flex-col gap-1 sm:col-span-2">
-                  Correction note
+                  Update note
                   <input
                     className="rounded border border-mist px-2 py-1.5"
                     value={editNote}
@@ -816,49 +829,57 @@ function AttendanceConsoleInner() {
                     placeholder="Reason for this change"
                   />
                 </label>
-                <label className="flex flex-col gap-1">
-                  Check-in
-                  <input
-                    type="datetime-local"
-                    className="rounded border border-mist px-2 py-1.5"
-                    value={editIn}
-                    onChange={(e) => setEditIn(e.target.value)}
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  Check-out
-                  <input
-                    type="datetime-local"
-                    className="rounded border border-mist px-2 py-1.5"
-                    value={editOut}
-                    onChange={(e) => setEditOut(e.target.value)}
-                  />
-                </label>
+                {canManage && (
+                  <>
+                    <label className="flex flex-col gap-1">
+                      Check-in
+                      <input
+                        type="datetime-local"
+                        className="rounded border border-mist px-2 py-1.5"
+                        value={editIn}
+                        onChange={(e) => setEditIn(e.target.value)}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      Check-out
+                      <input
+                        type="datetime-local"
+                        className="rounded border border-mist px-2 py-1.5"
+                        value={editOut}
+                        onChange={(e) => setEditOut(e.target.value)}
+                      />
+                    </label>
+                  </>
+                )}
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => manualPunch('IN')}
-                  className="text-sm px-3 py-1.5 rounded bg-brand-600 text-white disabled:opacity-60"
-                >
-                  Mark IN
-                </button>
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => manualPunch('OUT')}
-                  className="text-sm px-3 py-1.5 rounded bg-brand-900 text-white disabled:opacity-60"
-                >
-                  Mark OUT
-                </button>
+                {canManage && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => manualPunch('IN')}
+                      className="text-sm px-3 py-1.5 rounded bg-brand-600 text-white disabled:opacity-60"
+                    >
+                      Mark IN
+                    </button>
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => manualPunch('OUT')}
+                      className="text-sm px-3 py-1.5 rounded bg-brand-900 text-white disabled:opacity-60"
+                    >
+                      Mark OUT
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   disabled={saving}
                   onClick={saveCorrection}
                   className="text-sm px-3 py-1.5 rounded border border-brand-300 hover:bg-brand-50 disabled:opacity-60"
                 >
-                  Save correction
+                  Update Attendance
                 </button>
               </div>
             </div>

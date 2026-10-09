@@ -99,6 +99,14 @@ export function SheetQuickActionBar({ year, month, onChanged }: Props) {
     setDate(today.startsWith(`${year}-${String(month).padStart(2, '0')}`) ? today : date);
   }
 
+  /** WO / Festival / Office / PH default Paid; HD/WORK keep current selection. */
+  function onStatusChange(next: string) {
+    setStatus(next);
+    if (['WO', 'FESTIVAL', 'OFFICE', 'PH'].includes(next)) {
+      setPayment('Paid');
+    }
+  }
+
   async function save() {
     setSaving(true);
     setError('');
@@ -233,7 +241,7 @@ export function SheetQuickActionBar({ year, month, onChanged }: Props) {
             <select
               className="rounded border border-mist px-3 py-2 text-sm min-w-[180px]"
               value={status}
-              onChange={(e) => setStatus(e.target.value)}
+              onChange={(e) => onStatusChange(e.target.value)}
             >
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>

@@ -22,6 +22,11 @@ export function canManageAttendance(user: SessionUser | null): boolean {
   return user?.roles.some((r) => r === 'SUPER_ADMIN' || r === 'HR') ?? false;
 }
 
+/** Admin, HR, and Super Admin may update an existing attendance status/record. */
+export function canUpdateAttendance(user: SessionUser | null): boolean {
+  return user?.roles.some((r) => r === 'SUPER_ADMIN' || r === 'HR' || r === 'ADMIN') ?? false;
+}
+
 export function isOpsAdmin(user: SessionUser | null): boolean {
   return user?.roles.some((r) => r === 'SUPER_ADMIN' || r === 'ADMIN') ?? false;
 }

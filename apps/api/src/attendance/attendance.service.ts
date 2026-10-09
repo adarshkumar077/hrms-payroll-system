@@ -24,6 +24,7 @@ import {
 } from './dto/attendance.dto';
 import { isHrOrAbove, assertEmployeeScope } from '../common/authorization.util';
 import { calcDailyEarning, calcDailySalary } from '../payroll/payroll-calculator';
+import { buildExport } from '../common/export.engine';
 import {
   buildMapsUrl,
   formatHoursClock,
@@ -941,6 +942,8 @@ export class AttendanceService implements OnModuleInit {
       dayName: string;
       holidayName: string | null;
       holidayType: string | null;
+      /** Whether calendar day is paid (WO/PH defaults true) */
+      isPaid: boolean;
       inTime: string;
       inLocation: string;
       outTime: string;
@@ -1016,28 +1019,40 @@ export class AttendanceService implements OnModuleInit {
               ? 'Auto Checkout'
               : '—';
 
-        const status = record?.checkInAt
-          ? record.status
-          : (cal.autoStatus ?? record?.status ?? 'A');
+        // Calendar WO/PH/HD wins over stored Absent when there is no check-in.
+        // Approved leave / OD / WFH / genuine punches are never overwritten.
+        const preservedNoPunch =
+          !!record?.status &&
+          !record.checkInAt &&
+          record.status !== 'A' &&
+          ['PL', 'ULOB', 'OD', 'WFH', 'HD', 'H', 'PH', 'WO', 'L', 'P'].includes(record.status);
+        let status: string;
+        if (record?.checkInAt) {
+          status = record.status;
+        } else if (preservedNoPunch) {
+          status = record!.status;
+        } else if (cal.autoStatus) {
+          status = cal.autoStatus;
+        } else {
+          status = 'A';
+        }
 
         // Fixed daily salary rules — never inflate from OT / late checkout.
         let todaysEarnings: number | null = null;
         if (record?.checkInAt && !hasCheckout) {
           todaysEarnings = null; // pending checkout
-        } else if (cal.autoStatus && !record?.checkInAt) {
-          todaysEarnings = cal.paid
-            ? round2(calcDailyEarning(cal.autoStatus, dailySalary, { holidayPaid: cal.paid }).amount)
-            : 0;
-        } else if (record) {
+        } else if (preservedNoPunch) {
           todaysEarnings = round2(
-            calcDailyEarning(record.status, dailySalary, {
-              holidayPaid: cal.paid,
-            }).amount,
+            calcDailyEarning(record!.status, dailySalary, { holidayPaid: cal.paid }).amount,
           );
         } else if (cal.autoStatus) {
           todaysEarnings = cal.paid
             ? round2(calcDailyEarning(cal.autoStatus, dailySalary, { holidayPaid: cal.paid }).amount)
             : 0;
+        } else if (record) {
+          todaysEarnings = round2(
+            calcDailyEarning(record.status, dailySalary, { holidayPaid: cal.paid }).amount,
+          );
         }
 
         if (todaysEarnings != null) runningTotal = round2(runningTotal + todaysEarnings);
@@ -1050,6 +1065,7 @@ export class AttendanceService implements OnModuleInit {
           dayName,
           holidayName: cal.holidayName,
           holidayType: cal.holidayType,
+          isPaid: cal.paid,
           inTime: formatTime(record?.checkInAt),
           inLocation: inLoc,
           outTime: formatTime(record?.checkOutAt),
@@ -1079,6 +1095,75 @@ export class AttendanceService implements OnModuleInit {
     }
 
     return { year, month, employeeId: employeeId ?? null, rows };
+  }
+
+  /**
+   * Excel export of Attendance Sheet rows (same columns/rules as the sheet UI).
+   * Pass employeeId for one employee; omit for all active employees (Admin/HR/Super Admin).
+   */
+  async exportSheetExcel(
+    user: AuthUser,
+    opts: { employeeId?: string; year: number; month: number; scope: 'one' | 'all' },
+  ) {
+    if (opts.scope === 'all' && !this.isHr(user)) {
+      throw new ForbiddenException('Only Admin, HR, and Super Admin can export all employees');
+    }
+    if (opts.scope === 'one' && !opts.employeeId && this.isHr(user)) {
+      throw new BadRequestException('Select an employee to export');
+    }
+
+    const sheet = await this.attendanceSheet(user, {
+      employeeId: opts.scope === 'all' ? undefined : opts.employeeId,
+      year: opts.year,
+      month: opts.month,
+    });
+
+    const exportRows = sheet.rows.map((r) => {
+      const paidLabel =
+        r.status === 'WO' || r.status === 'PH' || r.status === 'H'
+          ? r.isPaid === false || r.todaysEarnings === 0
+            ? 'Unpaid'
+            : 'Paid'
+          : '';
+      return {
+        'Employee Code': r.employeeCode,
+        'Employee Name': r.employeeName,
+        Date: r.date,
+        Day: r.dayName,
+        Holiday: r.holidayName ?? '',
+        'Holiday Type': r.holidayType ?? '',
+        Status: r.status,
+        Paid: paidLabel,
+        In: r.inTime || '',
+        'In Location': r.inLocation && r.inLocation !== '—' ? r.inLocation : '',
+        'In Maps URL': r.checkInMapsUrl ?? '',
+        Out: r.outTime || '',
+        'Out Location': r.outLocation && r.outLocation !== '—' ? r.outLocation : '',
+        'Out Maps URL': r.checkOutMapsUrl ?? '',
+        'OUT Source': r.checkOutLabel ?? r.checkOutSource ?? '',
+        Hours: r.workingHours || '',
+        Overtime: r.overtime || '',
+        'Daily Salary': r.dailySalary,
+        "Today's Earnings": r.todaysEarnings ?? '',
+        'Running Total': r.runningTotal,
+        'Check-in Photo': r.checkInSelfieUrl ? 'Yes' : '',
+        'Check-out Photo': r.checkOutSelfieUrl ? 'Yes' : '',
+      };
+    });
+
+    const ym = `${sheet.year}-${String(sheet.month).padStart(2, '0')}`;
+    const title =
+      opts.scope === 'all'
+        ? `Attendance Sheet All ${ym}`
+        : `Attendance Sheet ${exportRows[0]?.['Employee Code'] ?? 'Employee'} ${ym}`;
+    const file = await buildExport('excel', title, exportRows);
+    if (opts.scope === 'all') {
+      file.filename = `attendance-sheet-all-${ym}.xlsx`;
+    } else {
+      const code = String(exportRows[0]?.['Employee Code'] ?? 'employee').replace(/[^\w.-]+/g, '_');
+      file.filename = `attendance-sheet-${code}-${ym}.xlsx`;
+    }
+    return file;
   }
 
   async recordDetail(user: AuthUser, employeeId: string, date: string) {
@@ -1176,8 +1261,9 @@ export class AttendanceService implements OnModuleInit {
   }
 
   async correct(user: AuthUser, employeeId: string, date: string, dto: CorrectAttendanceDto) {
-    if (!this.isAttendanceManager(user)) {
-      throw new ForbiddenException('Only HR and Super Admin can correct attendance');
+    // Super Admin, HR, and Admin may update an existing attendance record.
+    if (!this.isHr(user)) {
+      throw new ForbiddenException('Only Admin, HR, and Super Admin can update attendance');
     }
     const day = dateOnly(new Date(date));
     const emp = await this.prisma.employee.findFirst({
@@ -1192,6 +1278,7 @@ export class AttendanceService implements OnModuleInit {
       ? recordSnapshot(existing as unknown as Record<string, unknown>)
       : null;
 
+    // Only apply fields explicitly provided. Never clear original selfie / GPS / punch times.
     const extra: Record<string, unknown> = {};
     if (dto.overtimeMinutes != null) extra.overtimeMinutes = dto.overtimeMinutes;
     if (dto.todaysEarnings != null) extra.todaysEarnings = dto.todaysEarnings;
@@ -1202,12 +1289,15 @@ export class AttendanceService implements OnModuleInit {
     if (dto.checkInSelfieUrl != null) extra.checkInSelfieUrl = dto.checkInSelfieUrl;
     if (dto.checkOutSelfieUrl != null) extra.checkOutSelfieUrl = dto.checkOutSelfieUrl;
     if (dto.checkOutAt) extra.checkOutSource = CHECK_OUT_SOURCE.HR_MANUAL;
+    if (dto.method != null) extra.method = dto.method;
+    if (dto.checkInAt) extra.checkInAt = new Date(dto.checkInAt);
+    if (dto.checkOutAt) extra.checkOutAt = new Date(dto.checkOutAt);
 
     const checkInAt = dto.checkInAt ? new Date(dto.checkInAt) : existing?.checkInAt ?? undefined;
     const checkOutAt = dto.checkOutAt
       ? new Date(dto.checkOutAt)
       : existing?.checkOutAt ?? undefined;
-    if (checkInAt && checkOutAt && dto.overtimeMinutes == null) {
+    if (checkInAt && checkOutAt && dto.overtimeMinutes == null && (dto.checkInAt || dto.checkOutAt)) {
       const assignment = await this.prisma.shiftAssignment.findUnique({
         where: { employeeId_date: { employeeId, date: day } },
         include: { shift: true },
@@ -1242,9 +1332,6 @@ export class AttendanceService implements OnModuleInit {
       },
       update: {
         status: dto.status,
-        checkInAt: dto.checkInAt ? new Date(dto.checkInAt) : undefined,
-        checkOutAt: dto.checkOutAt ? new Date(dto.checkOutAt) : undefined,
-        method: dto.method,
         correctedBy: user.id,
         correctionNote: dto.correctionNote,
         ...extra,

@@ -265,7 +265,16 @@ export class HolidaysService {
     if (Number.isNaN(date.getTime())) throw new BadRequestException('Invalid date');
 
     const mapped = mapQuickActionStatus(dto.status);
-    const isPaid = /^paid$/i.test(dto.payment);
+    // WO / Festival / Office / PH default Paid; HD/WORK still honor dropdown.
+    const defaultPaid =
+      mapped.dayStatus === 'WO' ||
+      mapped.dayStatus === 'PH' ||
+      mapped.type === 'FESTIVAL' ||
+      mapped.type === 'OFFICE' ||
+      mapped.type === 'NATIONAL';
+    const isPaid = dto.payment
+      ? /^paid$/i.test(dto.payment)
+      : defaultPaid;
     const repeatYearly = /^yearly$/i.test(dto.repeat ?? 'ONE_TIME');
 
     let systemTag: string | null = mapped.systemTag;

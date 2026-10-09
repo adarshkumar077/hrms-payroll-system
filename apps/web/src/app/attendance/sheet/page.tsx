@@ -16,13 +16,20 @@ type SheetRow = {
   dayName: string;
   holidayName?: string | null;
   holidayType?: string | null;
+  isPaid?: boolean;
   inTime: string;
   outTime: string;
+  inLocation?: string;
+  outLocation?: string;
   status: string;
   workingHours: string;
   dailySalary: number;
   todaysEarnings: number | null;
   runningTotal: number;
+  checkInSelfieUrl?: string | null;
+  checkOutSelfieUrl?: string | null;
+  checkInMapsUrl?: string | null;
+  checkOutMapsUrl?: string | null;
   checkOutSource?: string | null;
   checkOutLabel?: string | null;
 };
@@ -67,6 +74,53 @@ function earningsLabel(n: number | null) {
   return money(0);
 }
 
+function SelfieThumb({
+  src,
+  label,
+  onOpen,
+}: {
+  src?: string | null;
+  label: string;
+  onOpen: (url: string) => void;
+}) {
+  if (!src) return <span className="text-ink/40">—</span>;
+  return (
+    <button type="button" onClick={() => onOpen(src)} title={label} className="shrink-0">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={label}
+        className="w-9 h-9 rounded object-cover border border-mist"
+      />
+    </button>
+  );
+}
+
+function LocationCell({
+  text,
+  mapsUrl,
+}: {
+  text?: string | null;
+  mapsUrl?: string | null;
+}) {
+  const label = text && text !== '—' ? text : null;
+  if (!label && !mapsUrl) return <span className="text-ink/40">—</span>;
+  if (mapsUrl) {
+    return (
+      <a
+        href={mapsUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="text-brand-600 hover:underline text-xs leading-snug break-words"
+        title={label ?? 'Open map'}
+      >
+        {label ?? 'Map'}
+      </a>
+    );
+  }
+  return <span className="text-xs text-ink/70 leading-snug break-words">{label}</span>;
+}
+
 export default function AttendanceSheetPage() {
   return (
     <Suspense
@@ -96,7 +150,9 @@ function AttendanceSheetInner() {
   const [rows, setRows] = useState<SheetRow[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState<'one' | 'all' | null>(null);
   const [hr, setHr] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   useEffect(() => {
     const u = getStoredUser();
@@ -140,21 +196,23 @@ function AttendanceSheetInner() {
     void load();
   }, [employeeId, hr, year, month, load]);
 
+  // Live refresh when selfie/GPS attendance is marked (same browser / other tab).
   useEffect(() => {
-    return onAttendanceChanged(() => {
+    return onAttendanceChanged((detail) => {
       if (!employeeId && hr) return;
+      if (detail.employeeId && employeeId && detail.employeeId !== employeeId) return;
       void load();
     });
   }, [employeeId, hr, load]);
 
-  // Soft refresh so 9 PM auto-checkout and other-tab punches appear without a full reload.
+  // Soft refresh so punches from another device appear without a full page reload.
   useEffect(() => {
     if (!employeeId && hr) return;
     const onFocus = () => void load();
     window.addEventListener('focus', onFocus);
     const id = window.setInterval(() => {
       if (document.visibilityState === 'visible') void load();
-    }, 60_000);
+    }, 15_000);
     return () => {
       window.removeEventListener('focus', onFocus);
       window.clearInterval(id);
@@ -166,6 +224,22 @@ function AttendanceSheetInner() {
     [rows],
   );
 
+  /** Photo/location columns: HR always; employees only when API returned geo (own sheet). */
+  const showCaptureCol = useMemo(
+    () =>
+      hr ||
+      rows.some(
+        (r) =>
+          r.checkInSelfieUrl ||
+          r.checkOutSelfieUrl ||
+          (r.inLocation && r.inLocation !== '—') ||
+          (r.outLocation && r.outLocation !== '—') ||
+          r.checkInMapsUrl ||
+          r.checkOutMapsUrl,
+      ),
+    [hr, rows],
+  );
+
   function downloadCsv() {
     const headers = [
       'Date',
@@ -173,7 +247,9 @@ function AttendanceSheetInner() {
       'Holiday',
       'Status',
       'In',
+      'In Location',
       'Out',
+      'Out Location',
       'Hours',
       'Daily Salary',
       "Today's Earnings",
@@ -188,7 +264,9 @@ function AttendanceSheetInner() {
           `"${(r.holidayName ?? '').replace(/"/g, '""')}"`,
           r.status,
           r.inTime,
+          `"${(r.inLocation ?? '').replace(/"/g, '""')}"`,
           r.outTime,
+          `"${(r.outLocation ?? '').replace(/"/g, '""')}"`,
           r.workingHours,
           r.dailySalary,
           r.todaysEarnings ?? '',
@@ -238,7 +316,50 @@ function AttendanceSheetInner() {
     }
   }
 
-  const colCount = (showEmployeeCol ? 1 : 0) + 10;
+  /** Attendance Sheet Excel — individual (selected employee) or all employees for year/month. */
+  async function exportSheetExcel(scope: 'one' | 'all') {
+    setError('');
+    if (scope === 'one' && hr && !employeeId) {
+      setError('Select an employee to export');
+      return;
+    }
+    setExporting(scope);
+    try {
+      const token = getToken();
+      const q = new URLSearchParams({
+        year: String(year),
+        month: String(month),
+        scope,
+      });
+      if (scope === 'one' && employeeId) q.set('employeeId', employeeId);
+      const res = await fetch(`${getApiBaseUrl()}/attendance/sheet/export/excel?${q}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { message?: string }).message ?? `Export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const disp = res.headers.get('Content-Disposition') ?? '';
+      const match = /filename="([^"]+)"/.exec(disp);
+      const fallback =
+        scope === 'all'
+          ? `attendance-sheet-all-${year}-${String(month).padStart(2, '0')}.xlsx`
+          : `attendance-sheet-${year}-${String(month).padStart(2, '0')}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = match?.[1] ?? fallback;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Excel export failed');
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  const colCount = (showEmployeeCol ? 1 : 0) + (showCaptureCol ? 2 : 0) + 10;
 
   return (
     <main className="max-w-7xl mx-auto px-4 py-10">
@@ -247,7 +368,7 @@ function AttendanceSheetInner() {
       </Link>
       <h1 className="font-display text-3xl text-brand-700 mt-2">Attendance Sheet</h1>
       <p className="text-sm text-ink/60 mb-4">
-        Daily in/out, hours, salary, and running earnings — updates live after check-in and checkout
+        Daily in/out, selfie, location, hours, and earnings — updates live after check-in and checkout
       </p>
 
       <div className="flex flex-wrap gap-2 mb-4 items-end">
@@ -312,6 +433,26 @@ function AttendanceSheetInner() {
         >
           Download CSV
         </button>
+        <button
+          type="button"
+          onClick={() => void exportSheetExcel('one')}
+          disabled={!!exporting || (hr && !employeeId)}
+          className="text-sm px-3 py-2 rounded border border-brand-300 hover:bg-brand-50 disabled:opacity-60"
+          title={hr && !employeeId ? 'Select an employee first' : 'Export selected employee sheet to Excel'}
+        >
+          {exporting === 'one' ? 'Exporting…' : 'Export Individual Employee'}
+        </button>
+        {hr && (
+          <button
+            type="button"
+            onClick={() => void exportSheetExcel('all')}
+            disabled={!!exporting}
+            className="text-sm px-3 py-2 rounded border border-brand-300 hover:bg-brand-50 disabled:opacity-60"
+            title="Export all employees for the selected month/year to one Excel file"
+          >
+            {exporting === 'all' ? 'Exporting…' : 'Export All Employees'}
+          </button>
+        )}
         {hr && (
           <>
             <button
@@ -345,7 +486,7 @@ function AttendanceSheetInner() {
       )}
 
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm min-w-[860px]">
+        <table className="w-full text-sm min-w-[980px]">
           <thead className="bg-slate-100 text-left text-slate-700">
             <tr>
               {showEmployeeCol && (
@@ -357,6 +498,12 @@ function AttendanceSheetInner() {
               <th className="px-3 py-2.5 font-medium whitespace-nowrap">Status</th>
               <th className="px-3 py-2.5 font-medium whitespace-nowrap">In</th>
               <th className="px-3 py-2.5 font-medium whitespace-nowrap">Out</th>
+              {showCaptureCol && (
+                <>
+                  <th className="px-3 py-2.5 font-medium whitespace-nowrap">Photo</th>
+                  <th className="px-3 py-2.5 font-medium whitespace-nowrap">Location</th>
+                </>
+              )}
               <th className="px-3 py-2.5 font-medium whitespace-nowrap">Hours</th>
               <th className="px-3 py-2.5 font-medium whitespace-nowrap text-right">Daily Salary</th>
               <th className="px-3 py-2.5 font-medium whitespace-nowrap text-right">Today&apos;s Earnings</th>
@@ -392,20 +539,28 @@ function AttendanceSheetInner() {
                     {r.holidayName || '—'}
                   </td>
                   <td className="px-3 py-2">
-                    <span
-                      className={`inline-block text-xs font-medium px-2 py-0.5 rounded ${
-                        STATUS_COLORS[r.status] ?? 'bg-gray-100 text-gray-700'
-                      }`}
-                    >
-                      {r.status}
-                      {r.status === 'WO' || r.status === 'PH'
-                        ? r.todaysEarnings != null && r.todaysEarnings > 0
-                          ? ' (Paid)'
-                          : r.todaysEarnings === 0
+                    <div className="flex flex-col gap-1 items-start">
+                      <span
+                        className={`inline-block text-xs font-medium px-2 py-0.5 rounded ${
+                          STATUS_COLORS[r.status] ?? 'bg-gray-100 text-gray-700'
+                        }`}
+                      >
+                        {r.status}
+                        {r.status === 'WO' || r.status === 'PH' || r.status === 'H'
+                          ? r.isPaid === false || r.todaysEarnings === 0
                             ? ' (Unpaid)'
-                            : ''
-                        : ''}
-                    </span>
+                            : ' (Paid)'
+                          : ''}
+                      </span>
+                      {hr && (
+                        <Link
+                          href={`/attendance?employeeId=${r.employeeId}&date=${r.date}`}
+                          className="text-[11px] text-brand-600 hover:underline"
+                        >
+                          Edit / Update
+                        </Link>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap tabular-nums">{r.inTime || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap tabular-nums">
@@ -414,6 +569,34 @@ function AttendanceSheetInner() {
                       <span className="ml-1 text-[10px] text-amber-700">Auto</span>
                     )}
                   </td>
+                  {showCaptureCol && (
+                    <>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1.5">
+                          <SelfieThumb
+                            src={r.checkInSelfieUrl}
+                            label="Check-in photo"
+                            onOpen={setLightbox}
+                          />
+                          {r.checkOutSelfieUrl ? (
+                            <SelfieThumb
+                              src={r.checkOutSelfieUrl}
+                              label="Check-out photo"
+                              onOpen={setLightbox}
+                            />
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 max-w-[180px]">
+                        <div className="space-y-1">
+                          <LocationCell text={r.inLocation} mapsUrl={r.checkInMapsUrl} />
+                          {(r.outLocation && r.outLocation !== '—') || r.checkOutMapsUrl ? (
+                            <LocationCell text={r.outLocation} mapsUrl={r.checkOutMapsUrl} />
+                          ) : null}
+                        </div>
+                      </td>
+                    </>
+                  )}
                   <td className="px-3 py-2 whitespace-nowrap tabular-nums">{r.workingHours || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-slate-800">
                     {money(r.dailySalary ?? 0)}
@@ -449,6 +632,23 @@ function AttendanceSheetInner() {
           </tbody>
         </table>
       </div>
+
+      {lightbox && (
+        <button
+          type="button"
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+          aria-label="Close photo"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox}
+            alt="Attendance photo"
+            className="max-h-[90vh] max-w-[90vw] rounded-lg shadow-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </button>
+      )}
     </main>
   );
 }

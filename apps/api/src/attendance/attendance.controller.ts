@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, StreamableFile } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoleCode } from '@prisma/client';
 import { AttendanceService } from './attendance.service';
@@ -17,6 +17,14 @@ import {
 @Controller()
 export class AttendanceController {
   constructor(private readonly attendance: AttendanceService) {}
+
+  private file(file: { filename: string; content: string | Buffer; contentType: string }) {
+    const buf = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content, 'utf8');
+    return new StreamableFile(buf, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.filename}"`,
+    });
+  }
 
   @Post('me/attendance/mark')
   mark(@CurrentUser() user: AuthUser, @Body() dto: MarkAttendanceDto) {
@@ -89,6 +97,26 @@ export class AttendanceController {
     });
   }
 
+  /** Export Attendance Sheet as .xlsx — one employee (employeeId) or all (scope=all). */
+  @Get('attendance/sheet/export/excel')
+  async exportSheetExcel(
+    @CurrentUser() user: AuthUser,
+    @Query('employeeId') employeeId?: string,
+    @Query('year') year?: string,
+    @Query('month') month?: string,
+    @Query('scope') scope?: string,
+  ) {
+    const now = new Date();
+    const exportScope = scope === 'all' ? 'all' : 'one';
+    const file = await this.attendance.exportSheetExcel(user, {
+      employeeId: employeeId || undefined,
+      year: year ? Number(year) : now.getFullYear(),
+      month: month ? Number(month) : now.getMonth() + 1,
+      scope: exportScope,
+    });
+    return this.file(file);
+  }
+
   @Get('attendance/records/:employeeId/:date')
   recordDetail(
     @CurrentUser() user: AuthUser,
@@ -122,7 +150,7 @@ export class AttendanceController {
   }
 
   @Put('attendance/:employeeId/:date')
-  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
   correct(
     @CurrentUser() user: AuthUser,
     @Param('employeeId') employeeId: string,

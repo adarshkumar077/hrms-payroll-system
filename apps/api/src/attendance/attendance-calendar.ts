@@ -91,7 +91,7 @@ export type ResolvedCalendarDay = {
 
 /**
  * Resolve Sunday / last-Saturday WO / festival-office / HD / working-day for a day.
- * Does not override days where the employee already checked in (status kept).
+ * Sundays + Festival/Office holidays never auto-resolve to Absent without a check-in.
  */
 export function resolveCalendarDay(opts: {
   dateKey: string;
@@ -109,12 +109,23 @@ export function resolveCalendarDay(opts: {
 
   const tag = holiday?.systemTag ?? null;
   const dayStatus = (holiday?.dayStatus ?? '').toUpperCase();
+  const isSunday = utcDay === 0;
+  const isLastSaturday = dateKey === lastSaturday.date;
 
   if (holiday && (tag === WORKING_DAY_TAG || dayStatus === 'WORK')) {
     holidayName = holiday.name || 'Working Day';
     holidayType = 'WORKING_DAY';
     paid = holiday.isPaid !== false;
-    autoStatus = null;
+    // Explicit "working day" override: if employee punched, keep punch status.
+    // Without a punch on a Sunday/last-Saturday, NEVER auto-Absent — keep paid WO.
+    if ((isSunday || isLastSaturday) && !hasCheckIn) {
+      return {
+        autoStatus: 'WO',
+        holidayName: 'Weekly Off',
+        paid: true,
+        holidayType: 'WEEKLY_OFF',
+      };
+    }
     if (hasCheckIn) return { autoStatus: null, holidayName, paid, holidayType };
     return { autoStatus: null, holidayName, paid, holidayType };
   }
@@ -127,7 +138,14 @@ export function resolveCalendarDay(opts: {
   } else if (holiday && tag !== LAST_SATURDAY_OVERRIDE_TAG) {
     holidayName = holiday.name;
     holidayType = holiday.type;
-    paid = holiday.isPaid !== false;
+    // Festival / Office / WO / PH default Paid unless explicitly unpaid
+    const festOrOffice =
+      holiday.type === 'FESTIVAL' ||
+      holiday.type === 'OFFICE' ||
+      holiday.type === 'NATIONAL' ||
+      dayStatus === 'PH' ||
+      dayStatus === 'WO';
+    paid = festOrOffice ? holiday.isPaid !== false : holiday.isPaid !== false;
     if (dayStatus === 'WO') autoStatus = 'WO';
     else if (dayStatus === 'HD') autoStatus = 'HD';
     else if (dayStatus === 'PH' || dayStatus === '' || dayStatus === 'H') autoStatus = 'PH';
@@ -136,15 +154,15 @@ export function resolveCalendarDay(opts: {
     } else {
       autoStatus = 'PH';
     }
-  } else if (utcDay === 0) {
+  } else if (isSunday) {
     holidayName = 'Weekly Off';
     holidayType = 'WEEKLY_OFF';
     paid = true;
     autoStatus = 'WO';
-  } else if (dateKey === lastSaturday.date) {
+  } else if (isLastSaturday) {
     holidayName = lastSaturday.name;
     holidayType = 'WEEKLY_OFF';
-    paid = lastSaturday.isPaid;
+    paid = lastSaturday.isPaid !== false;
     autoStatus = 'WO';
   }
 
