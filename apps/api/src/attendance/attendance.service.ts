@@ -11,6 +11,7 @@ import {
   AttendanceDayStatus,
   AttendanceMethod,
   AuditAction,
+  Prisma,
   RoleCode,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -23,8 +24,16 @@ import {
   MarkAttendanceDto,
 } from './dto/attendance.dto';
 import { isHrOrAbove, assertEmployeeScope } from '../common/authorization.util';
-import { calcDailyEarning, calcDailySalary } from '../payroll/payroll-calculator';
-import { buildExport } from '../common/export.engine';
+import {
+  calcDailyEarning,
+  calcDailySalary,
+  calcMandatoryTds,
+  calcPayrollPreview,
+  calendarDaysInMonth,
+  normalizePayrollConfig,
+  type EmployeePayrollConfigJson,
+} from '../payroll/payroll-calculator';
+import { buildAttendancePayrollWorkbook } from './attendance-payroll-export';
 import {
   buildMapsUrl,
   formatHoursClock,
@@ -227,7 +236,8 @@ export class AttendanceService implements OnModuleInit {
     const payrollCfg = await this.prisma.employeePayrollConfig.findUnique({
       where: { employeeId: opts.employeeId },
     });
-    const dailySalary = payrollCfg?.dailySalary ?? 0;
+    const dayCal = calendarDaysInMonth(opts.day.getUTCFullYear(), opts.day.getUTCMonth() + 1);
+    const dailySalary = calcDailySalary(payrollCfg?.grossMonthly ?? 0, dayCal);
     const baseEarning = calcDailyEarning(opts.status, dailySalary);
     // Overtime minutes are tracked for display only — earnings stay at fixed daily salary.
     const todaysEarnings =
@@ -647,6 +657,14 @@ export class AttendanceService implements OnModuleInit {
         data: { status: AttendanceDayStatus.ULOB },
       });
     }
+
+    // Also reconcile calendar-month late→HD so sheet/payroll/export stay consistent.
+    await this.reapplyLateConversionsForMonth(
+      companyId,
+      employeeId,
+      day.getUTCFullYear(),
+      day.getUTCMonth() + 1,
+    );
   }
 
   async incentiveEligibility(companyId: string, employeeId: string) {
@@ -804,8 +822,65 @@ export class AttendanceService implements OnModuleInit {
     return { year: y, month: m, days, summary };
   }
 
+  /** List queries must not SELECT selfie @db.Text columns (base64 blobs). */
+  private readonly attendanceListSelect = {
+    id: true,
+    employeeId: true,
+    date: true,
+    status: true,
+    checkInAt: true,
+    checkOutAt: true,
+    workMinutes: true,
+    overtimeMinutes: true,
+    todaysEarnings: true,
+    isLate: true,
+    lateMinutes: true,
+    method: true,
+    checkInLatitude: true,
+    checkInLongitude: true,
+    checkInAddress: true,
+    checkInMapsUrl: true,
+    checkOutLatitude: true,
+    checkOutLongitude: true,
+    checkOutAddress: true,
+    checkOutMapsUrl: true,
+    checkOutSource: true,
+  } as const;
+
+  /** Cheap presence flags without detoasting selfie payloads. */
+  private async selfiePresenceFlags(
+    companyId: string,
+    from: Date,
+    to: Date,
+    employeeIds: string[],
+  ): Promise<Map<string, { hasIn: boolean; hasOut: boolean }>> {
+    const map = new Map<string, { hasIn: boolean; hasOut: boolean }>();
+    if (employeeIds.length === 0) return map;
+    // Bind as DATE strings — JS Date params collapse same-day ranges to 0 rows on PG.
+    const fromKey = toDateKey(from);
+    const toKey = toDateKey(to);
+    const rows = await this.prisma.$queryRaw<
+      { employeeId: string; date: Date; hasIn: boolean; hasOut: boolean }[]
+    >(Prisma.sql`
+      SELECT employee_id AS "employeeId",
+             date,
+             (check_in_selfie_url IS NOT NULL OR selfie_url IS NOT NULL) AS "hasIn",
+             (check_out_selfie_url IS NOT NULL) AS "hasOut"
+      FROM attendance_records
+      WHERE company_id = ${companyId}
+        AND date >= CAST(${fromKey} AS DATE)
+        AND date <= CAST(${toKey} AS DATE)
+        AND employee_id IN (${Prisma.join(employeeIds)})
+    `);
+    for (const r of rows) {
+      const key = `${r.employeeId}:${toDateKey(r.date)}`;
+      map.set(key, { hasIn: !!r.hasIn, hasOut: !!r.hasOut });
+    }
+    return map;
+  }
+
   async console(companyId: string, date: string) {
-    const day = new Date(date);
+    const day = dateOnly(new Date(date));
     const employees = await this.prisma.employee.findMany({
       where: { companyId, isActive: true },
       select: {
@@ -817,16 +892,34 @@ export class AttendanceService implements OnModuleInit {
       },
       orderBy: { employeeCode: 'asc' },
     });
-    const records = await this.prisma.attendanceRecord.findMany({
-      where: { companyId, date: dateOnly(day) },
-    });
+    const empIds = employees.map((e) => e.id);
+    const [records, flags] = await Promise.all([
+      this.prisma.attendanceRecord.findMany({
+        where: { companyId, date: day },
+        select: this.attendanceListSelect,
+      }),
+      this.selfiePresenceFlags(companyId, day, day, empIds),
+    ]);
     const byEmp = new Map(records.map((r) => [r.employeeId, r]));
-    return employees.map((e) => ({
-      employee: e,
-      record: byEmp.get(e.id)
-        ? sanitizeAttendanceRecord(byEmp.get(e.id)!, true)
-        : null,
-    }));
+    return employees.map((e) => {
+      const rec = byEmp.get(e.id);
+      if (!rec) return { employee: e, record: null };
+      const key = `${e.id}:${toDateKey(day)}`;
+      const flag = flags.get(key);
+      return {
+        employee: e,
+        record: {
+          ...rec,
+          checkOutLabel: checkOutSourceLabel(rec.checkOutSource),
+          hasCheckInSelfie: flag?.hasIn ?? false,
+          hasCheckOutSelfie: flag?.hasOut ?? false,
+          // List payloads never embed base64 selfies — load via record detail.
+          checkInSelfieUrl: null,
+          checkOutSelfieUrl: null,
+          selfieUrl: null,
+        },
+      };
+    });
   }
 
   async monthlyGrid(companyId: string, year: number, month: number) {
@@ -837,14 +930,35 @@ export class AttendanceService implements OnModuleInit {
       select: { id: true, employeeCode: true, firstName: true, lastName: true },
       orderBy: { employeeCode: 'asc' },
     });
-    const records = await this.prisma.attendanceRecord.findMany({
-      where: { companyId, date: { gte: from, lte: to } },
+    const empIds = employees.map((e) => e.id);
+    const [records, flags] = await Promise.all([
+      this.prisma.attendanceRecord.findMany({
+        where: { companyId, date: { gte: from, lte: to } },
+        select: {
+          ...this.attendanceListSelect,
+          companyId: true,
+        },
+      }),
+      this.selfiePresenceFlags(companyId, from, to, empIds),
+    ]);
+    const slim = records.map((r) => {
+      const key = `${r.employeeId}:${toDateKey(r.date)}`;
+      const flag = flags.get(key);
+      return {
+        ...r,
+        hasCheckInSelfie: flag?.hasIn ?? false,
+        hasCheckOutSelfie: flag?.hasOut ?? false,
+        checkInSelfieUrl: null,
+        checkOutSelfieUrl: null,
+        selfieUrl: null,
+        checkOutLabel: checkOutSourceLabel(r.checkOutSource),
+      };
     });
     return {
       year,
       month,
       employees,
-      records: sanitizeAttendanceRecords(records, true),
+      records: slim,
     };
   }
 
@@ -872,7 +986,14 @@ export class AttendanceService implements OnModuleInit {
 
     const employees = await this.prisma.employee.findMany({
       where: empWhere,
-      select: { id: true, employeeCode: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        employeeCode: true,
+        firstName: true,
+        lastName: true,
+        department: true,
+        designation: true,
+      },
       orderBy: { employeeCode: 'asc' },
     });
     if (employeeId && employees.length === 0) {
@@ -880,13 +1001,14 @@ export class AttendanceService implements OnModuleInit {
     }
 
     const empIds = employees.map((e) => e.id);
-    const [records, payrollConfigs, holidayRows] = await Promise.all([
+    const [records, payrollConfigs, holidayRows, selfieFlags] = await Promise.all([
       this.prisma.attendanceRecord.findMany({
         where: {
           companyId: user.companyId,
           date: { gte: from, lte: to },
           employeeId: { in: empIds },
         },
+        select: this.attendanceListSelect,
         orderBy: [{ employeeId: 'asc' }, { date: 'asc' }],
       }),
       this.prisma.employeePayrollConfig.findMany({
@@ -896,6 +1018,7 @@ export class AttendanceService implements OnModuleInit {
           dailySalary: true,
           grossMonthly: true,
           workingDays: true,
+          configJson: true,
         },
       }),
       this.prisma.holiday.findMany({
@@ -908,6 +1031,7 @@ export class AttendanceService implements OnModuleInit {
         },
         orderBy: { date: 'asc' },
       }),
+      this.selfiePresenceFlags(user.companyId, from, to, empIds),
     ]);
 
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -954,6 +1078,8 @@ export class AttendanceService implements OnModuleInit {
       dailySalary: number;
       todaysEarnings: number | null;
       runningTotal: number;
+      hasCheckInSelfie: boolean;
+      hasCheckOutSelfie: boolean;
       checkInSelfieUrl: string | null;
       checkOutSelfieUrl: string | null;
       checkInMapsUrl: string | null;
@@ -966,6 +1092,11 @@ export class AttendanceService implements OnModuleInit {
       overtimeMinutes: number;
       checkOutSource: string | null;
       checkOutLabel: string | null;
+      isLate: boolean;
+      lateMinutes: number;
+      department: string | null;
+      designation: string | null;
+      grossMonthly: number;
     }[] = [];
 
     const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -974,10 +1105,9 @@ export class AttendanceService implements OnModuleInit {
       // Own sheet (or HR): show GPS location captured at check-in/out
       const showGeo = privileged || (!!user.employeeId && emp.id === user.employeeId);
       const cfg = payrollByEmp.get(emp.id);
-      const dailySalary = round2(
-        cfg?.dailySalary ??
-          calcDailySalary(cfg?.grossMonthly ?? 0, cfg?.workingDays ?? daysInMonth),
-      );
+      const grossMonthly = round2(cfg?.grossMonthly ?? 0);
+      // Per-day = gross ÷ actual calendar days of selected month (not fixed 30 / stale store).
+      const dailySalary = round2(calcDailySalary(grossMonthly, daysInMonth));
       let runningTotal = 0;
 
       for (let d = 1; d <= daysInMonth; d++) {
@@ -1076,10 +1206,15 @@ export class AttendanceService implements OnModuleInit {
           dailySalary,
           todaysEarnings,
           runningTotal,
-          checkInSelfieUrl: showGeo
-            ? (record?.checkInSelfieUrl ?? record?.selfieUrl ?? null)
-            : null,
-          checkOutSelfieUrl: showGeo ? (record?.checkOutSelfieUrl ?? null) : null,
+          // Never embed base64 selfies in sheet list — FE loads via record detail on demand.
+          hasCheckInSelfie: showGeo
+            ? (selfieFlags.get(`${emp.id}:${key}`)?.hasIn ?? false)
+            : false,
+          hasCheckOutSelfie: showGeo
+            ? (selfieFlags.get(`${emp.id}:${key}`)?.hasOut ?? false)
+            : false,
+          checkInSelfieUrl: null,
+          checkOutSelfieUrl: null,
           checkInMapsUrl: showGeo ? (record?.checkInMapsUrl ?? null) : null,
           checkOutMapsUrl: showGeo ? (record?.checkOutMapsUrl ?? null) : null,
           checkInLatitude: showGeo ? (record?.checkInLatitude ?? null) : null,
@@ -1090,6 +1225,11 @@ export class AttendanceService implements OnModuleInit {
           overtimeMinutes: otMins,
           checkOutSource: record?.checkOutSource ?? null,
           checkOutLabel: outLabel,
+          isLate: !!record?.isLate,
+          lateMinutes: record?.lateMinutes ?? 0,
+          department: emp.department ?? null,
+          designation: emp.designation ?? null,
+          grossMonthly,
         });
       }
     }
@@ -1098,8 +1238,8 @@ export class AttendanceService implements OnModuleInit {
   }
 
   /**
-   * Excel export of Attendance Sheet rows (same columns/rules as the sheet UI).
-   * Pass employeeId for one employee; omit for all active employees (Admin/HR/Super Admin).
+   * Professional multi-sheet Attendance & Payroll Excel (individual or all employees).
+   * Includes late→HD conversion summary using attendance.late_marks_to_half_day (default 3).
    */
   async exportSheetExcel(
     user: AuthUser,
@@ -1112,58 +1252,287 @@ export class AttendanceService implements OnModuleInit {
       throw new BadRequestException('Select an employee to export');
     }
 
+    // Ensure late-cycle HD + earnings are current before building the workbook.
+    if (opts.scope === 'one' && opts.employeeId) {
+      await this.reapplyLateConversionsForMonth(
+        user.companyId,
+        opts.employeeId,
+        opts.year,
+        opts.month,
+      );
+    } else if (opts.scope === 'all') {
+      await this.reapplyLateConversionsForCompanyMonth(user.companyId, opts.year, opts.month);
+    }
+
     const sheet = await this.attendanceSheet(user, {
       employeeId: opts.scope === 'all' ? undefined : opts.employeeId,
       year: opts.year,
       month: opts.month,
     });
 
-    const exportRows = sheet.rows.map((r) => {
-      const paidLabel =
-        r.status === 'WO' || r.status === 'PH' || r.status === 'H'
-          ? r.isPaid === false || r.todaysEarnings === 0
-            ? 'Unpaid'
-            : 'Paid'
-          : '';
+    const lateToHalf = await this.setting<number>(
+      user.companyId,
+      'attendance.late_marks_to_half_day',
+      3,
+    );
+    const company = await this.prisma.company.findUnique({ where: { id: user.companyId } });
+    const companyName = company?.legalName || company?.name || 'Enhance IT Infrastructure (EITF)';
+    const calendarDays = new Date(Date.UTC(opts.year, opts.month, 0)).getUTCDate();
+
+    const empIds = [...new Set(sheet.rows.map((r) => r.employeeId))];
+    const payrollConfigs = await this.prisma.employeePayrollConfig.findMany({
+      where: { employeeId: { in: empIds } },
+    });
+    const payrollByEmp = new Map(payrollConfigs.map((c) => [c.employeeId, c]));
+    const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+    const employees = empIds.map((id) => {
+      const sample = sheet.rows.find((r) => r.employeeId === id)!;
+      const cfg = payrollByEmp.get(id);
+      const grossMonthly = sample.grossMonthly || cfg?.grossMonthly || 0;
+      const dailySalary = calcDailySalary(grossMonthly, calendarDays);
+      let pf = 0;
+      let esd = 0;
+      let tds = calcMandatoryTds(grossMonthly);
+      let otherDeductions = 0;
+      let professionalTax = 0;
+      let esdRemainingBalance = 0;
+      let esdDeductedToDate = 0;
+      let esdEnabled = false;
+      let esdType: 'monthly' | 'one_time' | 'custom' = 'monthly';
+      let esdTotalAmount = 0;
+      let pfEnabled = false;
+      if (cfg?.configJson) {
+        try {
+          const config = normalizePayrollConfig(cfg.configJson as EmployeePayrollConfigJson);
+          const preview = calcPayrollPreview({ grossMonthly, config });
+          pf = preview.pf;
+          esd = preview.esd;
+          tds = preview.tds;
+          professionalTax = preview.professionalTax;
+          otherDeductions = r2(preview.otherDeductions + preview.professionalTax);
+          esdRemainingBalance = preview.esdRemainingBalance;
+          esdDeductedToDate = config.deductions.esd.deductedToDate ?? 0;
+          esdEnabled = !!config.deductions.esd.enabled;
+          esdType = config.deductions.esd.type ?? 'monthly';
+          esdTotalAmount = config.deductions.esd.totalAmount ?? config.deductions.esd.amount ?? 0;
+          pfEnabled = !!config.deductions.pf.enabled;
+        } catch {
+          /* keep defaults — no invented PF/ESD when settings unavailable */
+        }
+      }
       return {
-        'Employee Code': r.employeeCode,
-        'Employee Name': r.employeeName,
-        Date: r.date,
-        Day: r.dayName,
-        Holiday: r.holidayName ?? '',
-        'Holiday Type': r.holidayType ?? '',
-        Status: r.status,
-        Paid: paidLabel,
-        In: r.inTime || '',
-        'In Location': r.inLocation && r.inLocation !== '—' ? r.inLocation : '',
-        'In Maps URL': r.checkInMapsUrl ?? '',
-        Out: r.outTime || '',
-        'Out Location': r.outLocation && r.outLocation !== '—' ? r.outLocation : '',
-        'Out Maps URL': r.checkOutMapsUrl ?? '',
-        'OUT Source': r.checkOutLabel ?? r.checkOutSource ?? '',
-        Hours: r.workingHours || '',
-        Overtime: r.overtime || '',
-        'Daily Salary': r.dailySalary,
-        "Today's Earnings": r.todaysEarnings ?? '',
-        'Running Total': r.runningTotal,
-        'Check-in Photo': r.checkInSelfieUrl ? 'Yes' : '',
-        'Check-out Photo': r.checkOutSelfieUrl ? 'Yes' : '',
+        employeeId: id,
+        employeeCode: sample.employeeCode,
+        employeeName: sample.employeeName,
+        department: sample.department,
+        designation: sample.designation,
+        grossMonthly,
+        dailySalary,
+        calendarDays,
+        pf,
+        pfEnabled,
+        esd,
+        esdEnabled,
+        esdType,
+        esdTotalAmount,
+        esdDeductedToDate,
+        esdRemainingBalance,
+        tds,
+        otherDeductions,
+        professionalTax,
       };
     });
 
+    const content = await buildAttendancePayrollWorkbook({
+      companyName,
+      logoUrl: company?.logoUrl ?? null,
+      year: sheet.year,
+      month: sheet.month,
+      generatedAt: new Date(),
+      lateToHalf,
+      calendarDays,
+      days: sheet.rows.map((r) => ({
+        employeeId: r.employeeId,
+        employeeCode: r.employeeCode,
+        employeeName: r.employeeName,
+        department: r.department,
+        designation: r.designation,
+        date: r.date,
+        dayName: r.dayName,
+        status: r.status,
+        isLate: r.isLate,
+        lateMinutes: r.lateMinutes,
+        inTime: r.inTime,
+        outTime: r.outTime,
+        workingHours: r.workingHours,
+        overtime: r.overtime,
+        overtimeMinutes: r.overtimeMinutes,
+        dailySalary: r.dailySalary,
+        todaysEarnings: r.todaysEarnings,
+        runningTotal: r.runningTotal,
+        isPaid: r.isPaid,
+        holidayName: r.holidayName,
+        remarks: r.checkOutLabel ?? undefined,
+      })),
+      employees,
+    });
+
     const ym = `${sheet.year}-${String(sheet.month).padStart(2, '0')}`;
-    const title =
+    const filename =
       opts.scope === 'all'
-        ? `Attendance Sheet All ${ym}`
-        : `Attendance Sheet ${exportRows[0]?.['Employee Code'] ?? 'Employee'} ${ym}`;
-    const file = await buildExport('excel', title, exportRows);
-    if (opts.scope === 'all') {
-      file.filename = `attendance-sheet-all-${ym}.xlsx`;
-    } else {
-      const code = String(exportRows[0]?.['Employee Code'] ?? 'employee').replace(/[^\w.-]+/g, '_');
-      file.filename = `attendance-sheet-${code}-${ym}.xlsx`;
+        ? `attendance-payroll-all-${ym}.xlsx`
+        : `attendance-payroll-${String(employees[0]?.employeeCode ?? 'employee').replace(/[^\w.-]+/g, '_')}-${ym}.xlsx`;
+
+    return {
+      filename,
+      content,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    };
+  }
+
+  /**
+   * Re-apply month-scoped late→HD cycle after edits / historical recalculation.
+   *
+   * Exact rule (resets every 3 lates):
+   *   1st & 2nd late → Late Present (L), full daily salary
+   *   3rd late → HD on THAT exact date @ 50% daily salary
+   *   4th late → cycle restarts as 1st (full pay)
+   *   6th late → 2nd HD @ 50%, and so on
+   *
+   * Recalculates todaysEarnings. Never creates duplicate records, HDs, or deductions.
+   * Does not touch photos / locations.
+   */
+  async reapplyLateConversionsForMonth(
+    companyId: string,
+    employeeId: string,
+    year: number,
+    month: number,
+  ) {
+    const lateToHalf = Math.max(
+      1,
+      await this.setting<number>(companyId, 'attendance.late_marks_to_half_day', 3),
+    );
+    const fullHours = await this.setting<number>(companyId, 'office.full_day_hours', 8);
+    const halfHours = await this.setting<number>(companyId, 'office.half_day_hours', 4);
+    const from = new Date(Date.UTC(year, month - 1, 1));
+    const to = new Date(Date.UTC(year, month, 0));
+    const daysInMonth = to.getUTCDate();
+
+    const records = await this.prisma.attendanceRecord.findMany({
+      where: { companyId, employeeId, date: { gte: from, lte: to } },
+      orderBy: { date: 'asc' },
+    });
+
+    const payrollCfg = await this.prisma.employeePayrollConfig.findUnique({
+      where: { employeeId },
+    });
+    const gross = payrollCfg?.grossMonthly ?? 0;
+    const dailySalary = calcDailySalary(gross, daysInMonth);
+    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+    /** Statuses the late-cycle may set to HD / restore to L or P */
+    const cycleMutable = new Set<AttendanceDayStatus>([
+      AttendanceDayStatus.P,
+      AttendanceDayStatus.L,
+      AttendanceDayStatus.HD,
+    ]);
+
+    let lateCount = 0;
+    for (const rec of records) {
+      let nextStatus = rec.status;
+      const hours = (rec.workMinutes ?? 0) / 60;
+      const hoursBasedHd =
+        !!rec.checkOutAt && hours >= halfHours && hours < fullHours;
+      const fullDayHours = !!rec.checkOutAt && hours >= fullHours;
+
+      if (rec.isLate) {
+        // Every late mark advances the cycle — including days we cannot convert (leave/ULOB).
+        lateCount += 1;
+        const shouldConvert = lateCount % lateToHalf === 0;
+
+        if (cycleMutable.has(rec.status)) {
+          if (shouldConvert) {
+            // Exact date of the 3rd late in this cycle → one HD @ 50% (no duplicate).
+            nextStatus = AttendanceDayStatus.HD;
+          } else if (hoursBasedHd) {
+            // Short hours → normal (manual/hours) HD — not a late-cycle conversion.
+            nextStatus = AttendanceDayStatus.HD;
+          } else {
+            // 1st / 2nd in cycle (or 4th / 5th…): full Late Present.
+            nextStatus = AttendanceDayStatus.L;
+          }
+        }
+        // Leave / WO / PH / ULOB / etc. stay unchanged; late still counted in the cycle.
+      } else if (cycleMutable.has(rec.status)) {
+        // Late mark cleared: undo late-cycle HD when hours support a full day.
+        if (rec.status === AttendanceDayStatus.HD && fullDayHours && !hoursBasedHd) {
+          nextStatus = AttendanceDayStatus.P;
+        } else if (
+          rec.status === AttendanceDayStatus.L &&
+          fullDayHours
+        ) {
+          nextStatus = AttendanceDayStatus.P;
+        } else if (hoursBasedHd) {
+          nextStatus = AttendanceDayStatus.HD;
+        }
+      }
+
+      let todaysEarnings = rec.todaysEarnings;
+      if (rec.checkInAt && rec.checkOutAt) {
+        todaysEarnings = round2(calcDailyEarning(nextStatus, dailySalary).amount);
+      } else if (
+        !rec.checkInAt &&
+        (nextStatus === AttendanceDayStatus.A || nextStatus === AttendanceDayStatus.ULOB)
+      ) {
+        todaysEarnings = round2(calcDailyEarning(nextStatus, dailySalary).amount);
+      } else if (rec.checkInAt && !rec.checkOutAt && nextStatus === AttendanceDayStatus.HD) {
+        // Open day already converted to late-cycle HD — lock half-day earning.
+        todaysEarnings = round2(calcDailyEarning(AttendanceDayStatus.HD, dailySalary).amount);
+      }
+
+      const statusChanged = nextStatus !== rec.status;
+      const earnChanged =
+        todaysEarnings != null &&
+        (rec.todaysEarnings == null ||
+          Math.abs((rec.todaysEarnings ?? 0) - todaysEarnings) > 0.001);
+
+      if (statusChanged || earnChanged) {
+        await this.prisma.attendanceRecord.update({
+          where: { id: rec.id },
+          data: {
+            ...(statusChanged ? { status: nextStatus } : {}),
+            ...(earnChanged || statusChanged ? { todaysEarnings } : {}),
+          },
+        });
+      }
     }
-    return file;
+  }
+
+  /**
+   * Recalculate late→HD cycle + daily earnings for every employee in a company month.
+   * Safe: updates status/earnings only; never deletes attendance, photos, or locations.
+   */
+  async reapplyLateConversionsForCompanyMonth(
+    companyId: string,
+    year: number,
+    month: number,
+  ) {
+    const from = new Date(Date.UTC(year, month - 1, 1));
+    const to = new Date(Date.UTC(year, month, 0));
+    const grouped = await this.prisma.attendanceRecord.groupBy({
+      by: ['employeeId'],
+      where: { companyId, date: { gte: from, lte: to } },
+    });
+    let processed = 0;
+    for (const g of grouped) {
+      await this.reapplyLateConversionsForMonth(companyId, g.employeeId, year, month);
+      processed += 1;
+    }
+    this.logger.log(
+      `Late-cycle recalculation complete for ${year}-${String(month).padStart(2, '0')}: ${processed} employee(s)`,
+    );
+    return { year, month, employeesProcessed: processed };
   }
 
   async recordDetail(user: AuthUser, employeeId: string, date: string) {
@@ -1180,8 +1549,33 @@ export class AttendanceService implements OnModuleInit {
     const record = await this.prisma.attendanceRecord.findUnique({
       where: { employeeId_date: { employeeId, date: day } },
       include: {
-        punches: { orderBy: { punchedAt: 'asc' } },
-        auditLogs: { orderBy: { createdAt: 'asc' } },
+        punches: {
+          orderBy: { punchedAt: 'asc' },
+          // Punch selfie blobs are huge; detail uses record-level check-in/out photos.
+          select: {
+            id: true,
+            punchedAt: true,
+            punchType: true,
+            method: true,
+            latitude: true,
+            longitude: true,
+            accuracyM: true,
+            address: true,
+            mapsUrl: true,
+            deviceInfo: true,
+            createdAt: true,
+          },
+        },
+        auditLogs: {
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            action: true,
+            note: true,
+            createdAt: true,
+            actorId: true,
+          },
+        },
       },
     });
 
@@ -1282,6 +1676,11 @@ export class AttendanceService implements OnModuleInit {
     const extra: Record<string, unknown> = {};
     if (dto.overtimeMinutes != null) extra.overtimeMinutes = dto.overtimeMinutes;
     if (dto.todaysEarnings != null) extra.todaysEarnings = dto.todaysEarnings;
+    if (dto.isLate != null) {
+      extra.isLate = dto.isLate;
+      if (dto.isLate === false && dto.lateMinutes == null) extra.lateMinutes = 0;
+    }
+    if (dto.lateMinutes != null) extra.lateMinutes = dto.lateMinutes;
     if (dto.checkInAddress != null) extra.checkInAddress = dto.checkInAddress;
     if (dto.checkOutAddress != null) extra.checkOutAddress = dto.checkOutAddress;
     if (dto.checkInMapsUrl != null) extra.checkInMapsUrl = dto.checkInMapsUrl;
@@ -1357,7 +1756,16 @@ export class AttendanceService implements OnModuleInit {
       entityId: record.id,
       metadata: { correction: true, status: dto.status },
     });
-    return sanitizeAttendanceRecord(record, true);
+
+    // Recalculate month-scoped late→HD conversions after any HR correction.
+    await this.reapplyLateConversionsForMonth(
+      user.companyId,
+      employeeId,
+      day.getUTCFullYear(),
+      day.getUTCMonth() + 1,
+    );
+    const refreshed = await this.prisma.attendanceRecord.findUnique({ where: { id: record.id } });
+    return sanitizeAttendanceRecord(refreshed ?? record, true);
   }
 
   async counters(companyId: string) {

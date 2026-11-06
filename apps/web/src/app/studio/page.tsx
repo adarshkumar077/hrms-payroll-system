@@ -24,7 +24,32 @@ type Settings = {
   accentColor: string;
   darkModeEnabled: boolean;
   dashboardWidgets?: Record<string, boolean>;
+  sidebarConfig?: Record<string, unknown>;
 };
+
+/** PUT /studio/settings — omit read-only GET fields (id, company, organization, …). */
+function studioUpdatePayload(s: Settings): Settings {
+  return {
+    displayName: s.displayName,
+    legalName: s.legalName ?? null,
+    address: s.address ?? null,
+    phone: s.phone ?? null,
+    email: s.email ?? null,
+    website: s.website ?? null,
+    gst: s.gst ?? null,
+    pan: s.pan ?? null,
+    logoUrl: s.logoUrl ?? null,
+    faviconUrl: s.faviconUrl ?? null,
+    loginLogoUrl: s.loginLogoUrl ?? null,
+    emailLogoUrl: s.emailLogoUrl ?? null,
+    primaryColor: s.primaryColor,
+    secondaryColor: s.secondaryColor,
+    accentColor: s.accentColor,
+    darkModeEnabled: s.darkModeEnabled,
+    dashboardWidgets: s.dashboardWidgets,
+    sidebarConfig: s.sidebarConfig,
+  };
+}
 
 export default function StudioPage() {
   const router = useRouter();
@@ -49,10 +74,19 @@ export default function StudioPage() {
 
   async function save() {
     if (!s) return;
-    const next = await api<Settings>('/studio/settings', { method: 'PUT', body: JSON.stringify(s) });
-    setS(next);
-    applyTheme(next);
-    setMsg('Studio settings applied across EITF');
+    setError('');
+    setMsg('');
+    try {
+      const next = await api<Settings>('/studio/settings', {
+        method: 'PUT',
+        body: JSON.stringify(studioUpdatePayload(s)),
+      });
+      setS(next);
+      applyTheme(next);
+      setMsg('Studio settings applied across EITF');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed');
+    }
   }
 
   if (!s) {

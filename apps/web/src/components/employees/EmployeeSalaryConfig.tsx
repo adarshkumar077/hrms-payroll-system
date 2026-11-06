@@ -5,9 +5,11 @@ import { api } from '@/lib/api';
 import {
   calcDailySalary,
   calcPayrollPreview,
+  calendarDaysInMonth,
   defaultPayrollConfigJson,
   normalizePayrollConfig,
   EmployeePayrollConfigJson,
+  TDS_PERCENT,
 } from '@/lib/payroll-calculator';
 
 type Props = {
@@ -47,8 +49,15 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
   const [hourlySalary, setHourlySalary] = useState('');
   const [salaryType, setSalaryType] = useState<'MONTHLY' | 'DAILY'>('MONTHLY');
   const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
-  const [workingDays, setWorkingDays] = useState(30);
+  const [workingDays, setWorkingDays] = useState(() => {
+    const n = new Date();
+    return calendarDaysInMonth(n.getFullYear(), n.getMonth() + 1);
+  });
   const [config, setConfig] = useState<EmployeePayrollConfigJson>(defaultPayrollConfigJson());
+  const calendarDaysNow = useMemo(() => {
+    const n = new Date();
+    return calendarDaysInMonth(n.getFullYear(), n.getMonth() + 1);
+  }, []);
   const [history, setHistory] = useState<
     {
       year: number;
@@ -99,13 +108,17 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
         setHourlySalary(cfg.hourlySalary != null ? String(cfg.hourlySalary) : '');
         setSalaryType((cfg.salaryType as 'MONTHLY' | 'DAILY') ?? 'MONTHLY');
         setEffectiveFrom(String(cfg.effectiveFrom).slice(0, 10));
-        setWorkingDays(cfg.workingDays ?? 30);
+        const days = calendarDaysNow;
+        setWorkingDays(days);
         setConfig(normalizePayrollConfig(cfg.config));
+        if (cfg.grossMonthly) {
+          setDailySalary(String(calcDailySalary(cfg.grossMonthly, days)));
+        }
         setHistory(hist);
       })
       .catch((e) => onError?.(e instanceof Error ? e.message : 'Failed to load salary config'))
       .finally(() => setLoading(false));
-  }, [employeeId, onError]);
+  }, [employeeId, onError, calendarDaysNow]);
 
   const preview = useMemo(
     () => calcPayrollPreview({ grossMonthly: parseMoneyInput(grossMonthly), config }),
@@ -161,30 +174,26 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
               const v = e.target.value;
               const numeric = parseMoneyInput(v);
               setGrossMonthly(v);
-              setDailySalary(v ? String(calcDailySalary(numeric, workingDays)) : '');
-              setConfig((prev) => ({
-                ...prev,
-                deductions: {
-                  ...prev.deductions,
-                  tds: prev.deductions.tds.enabled
-                    ? { ...prev.deductions.tds, mode: 'percent', value: 1 }
-                    : prev.deductions.tds,
-                },
-              }));
+              setDailySalary(v ? String(calcDailySalary(numeric, calendarDaysNow)) : '');
             }}
           />
         </label>
         <label className="block text-sm">
-          <span className="text-ink/70">Daily Salary (auto / editable)</span>
+          <span className="text-ink/70">
+            Per-Day Salary (Gross ÷ {calendarDaysNow} calendar days)
+          </span>
           <input
             type="number"
             min={0}
-            disabled={!isAdmin}
-            className="mt-1 w-full rounded border border-mist px-3 py-2"
+            disabled
+            className="mt-1 w-full rounded border border-mist px-3 py-2 bg-mist/40"
             value={dailySalary}
             step="0.01"
-            onChange={(e) => setDailySalary(e.target.value)}
+            readOnly
           />
+          <span className="text-xs text-ink/50">
+            Uses actual calendar days of the selected payroll month (incl. leap years).
+          </span>
         </label>
         <label className="block text-sm">
           <span className="text-ink/70">Hourly Salary (optional)</span>
@@ -221,18 +230,13 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
           />
         </label>
         <label className="block text-sm">
-          <span className="text-ink/70">Working Days / Month</span>
+          <span className="text-ink/70">Calendar Days (this month)</span>
           <input
             type="number"
-            min={1}
-            disabled={!isAdmin}
-            className="mt-1 w-full rounded border border-mist px-3 py-2"
+            disabled
+            className="mt-1 w-full rounded border border-mist px-3 py-2 bg-mist/40"
             value={workingDays}
-            onChange={(e) => {
-              const wd = Number(e.target.value) || 30;
-              setWorkingDays(wd);
-              setDailySalary(grossMonthly ? String(calcDailySalary(parseMoneyInput(grossMonthly), wd)) : '');
-            }}
+            readOnly
           />
         </label>
       </div>
@@ -303,136 +307,244 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
       <section>
         <h3 className="text-sm font-medium text-brand-700 mb-2">Deductions</h3>
         <div className="space-y-3 text-sm">
-          {(
-            [
-              ['pf', 'Provident Fund (PF)'],
-              ['tds', 'TDS'],
-            ] as const
-          ).map(([key, label]) => (
-            <div key={key} className="rounded border border-mist p-3">
-              <label className="flex items-center gap-2">
+          <div className="rounded border border-mist p-3">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                disabled={!isAdmin}
+                checked={config.deductions.pf.enabled}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    deductions: {
+                      ...config.deductions,
+                      pf: {
+                        ...config.deductions.pf,
+                        enabled: e.target.checked,
+                        mode: 'fixed',
+                        value: e.target.checked ? config.deductions.pf.value || 3600 : config.deductions.pf.value,
+                      },
+                    },
+                  })
+                }
+              />
+              Enable PF Deduction
+            </label>
+            {config.deductions.pf.enabled && (
+              <label className="mt-2 block">
+                <span className="text-ink/70">Monthly PF amount (₹)</span>
                 <input
-                  type="checkbox"
+                  type="number"
+                  min={0}
                   disabled={!isAdmin}
-                  checked={config.deductions[key].enabled}
+                  className="mt-1 w-full rounded border border-mist px-2 py-1"
+                  step="0.01"
+                  value={config.deductions.pf.value ?? ''}
                   onChange={(e) =>
                     setConfig({
                       ...config,
                       deductions: {
                         ...config.deductions,
-                        [key]: {
-                          ...config.deductions[key],
-                          enabled: e.target.checked,
-                          mode: key === 'pf' ? 'fixed' : 'percent',
-                          value: key === 'pf' ? 3600 : 1,
+                        pf: {
+                          ...config.deductions.pf,
+                          mode: 'fixed',
+                          value: parseMoneyInput(e.target.value),
                         },
                       },
                     })
                   }
                 />
-                {label}
               </label>
-              {config.deductions[key].enabled && (
-                <div className="mt-2 flex gap-2">
+            )}
+          </div>
+
+          <div className="rounded border border-brand-200 bg-brand-50/40 p-3">
+            <p className="font-medium text-brand-800">TDS (1%) — Mandatory for every employee</p>
+            <p className="text-xs text-ink/60 mt-1">
+              Automatically calculated as Applicable Monthly Gross × {TDS_PERCENT}%. Cannot be disabled.
+            </p>
+            <p className="mt-2 text-sm">
+              This month TDS preview:{' '}
+              <span className="font-semibold">{money(preview.tds)}</span>
+            </p>
+          </div>
+
+          <div className="rounded border border-mist p-3">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                disabled={!isAdmin}
+                checked={config.deductions.esd.enabled}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    deductions: {
+                      ...config.deductions,
+                      esd: {
+                        ...config.deductions.esd,
+                        enabled: e.target.checked,
+                        amount: e.target.checked
+                          ? config.deductions.esd.amount || 500
+                          : config.deductions.esd.amount,
+                        type: config.deductions.esd.type || 'monthly',
+                      },
+                    },
+                  })
+                }
+              />
+              Enable Security Deposit Deduction
+            </label>
+            {config.deductions.esd.enabled && (
+              <div className="mt-2 grid sm:grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="text-ink/70">Deduction type</span>
                   <select
                     disabled={!isAdmin}
-                    className="rounded border border-mist px-2 py-1"
-                    value={config.deductions[key].mode ?? 'percent'}
+                    className="mt-1 w-full rounded border border-mist px-2 py-1"
+                    value={config.deductions.esd.type ?? 'monthly'}
                     onChange={(e) =>
                       setConfig({
                         ...config,
                         deductions: {
                           ...config.deductions,
-                          [key]: {
-                            ...config.deductions[key],
-                            mode: e.target.value as 'percent' | 'fixed',
+                          esd: {
+                            ...config.deductions.esd,
+                            type: e.target.value as 'monthly' | 'one_time' | 'custom',
                           },
                         },
                       })
                     }
                   >
-                    <option value="percent">Percentage (%)</option>
-                    <option value="fixed">Fixed Amount</option>
+                    <option value="monthly">Fixed monthly amount</option>
+                    <option value="one_time">One-time deduction</option>
+                    <option value="custom">Custom deduction amount</option>
                   </select>
+                </label>
+                <label className="block">
+                  <span className="text-ink/70">
+                    {config.deductions.esd.type === 'one_time'
+                      ? 'One-time amount (₹)'
+                      : 'Amount this month (₹)'}
+                  </span>
                   <input
                     type="number"
                     min={0}
                     disabled={!isAdmin}
-                    className="flex-1 rounded border border-mist px-2 py-1"
+                    className="mt-1 w-full rounded border border-mist px-2 py-1"
                     step="0.01"
-                    value={config.deductions[key].value ?? ''}
+                    value={config.deductions.esd.amount ?? ''}
                     onChange={(e) =>
                       setConfig({
                         ...config,
                         deductions: {
                           ...config.deductions,
-                          [key]: {
-                            ...config.deductions[key],
-                            value: parseMoneyInput(e.target.value),
+                          esd: {
+                            ...config.deductions.esd,
+                            amount: parseMoneyInput(e.target.value),
                           },
                         },
                       })
                     }
                   />
-                </div>
-              )}
-            </div>
-          ))}
-          {(
-            [
-              ['esd', 'Employee Security Deposit'],
-              ['professionalTax', 'Professional Tax'],
-            ] as const
-          ).map(([key, label]) => (
-            <div key={key} className="rounded border border-mist p-3">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  disabled={!isAdmin}
-                  checked={config.deductions[key].enabled}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      deductions: {
-                        ...config.deductions,
-                        [key]: {
-                          ...config.deductions[key],
-                          enabled: e.target.checked,
-                          amount:
-                            key === 'esd' && e.target.checked
-                              ? 500
-                              : config.deductions[key].amount,
+                </label>
+                <label className="block">
+                  <span className="text-ink/70">Total deposit target (₹)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    disabled={!isAdmin}
+                    className="mt-1 w-full rounded border border-mist px-2 py-1"
+                    step="0.01"
+                    value={config.deductions.esd.totalAmount ?? ''}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        deductions: {
+                          ...config.deductions,
+                          esd: {
+                            ...config.deductions.esd,
+                            totalAmount: parseMoneyInput(e.target.value),
+                          },
                         },
-                      },
-                    })
-                  }
-                />
-                {label}
-              </label>
-              {config.deductions[key].enabled && (
-                <input
-                  type="number"
-                  min={0}
-                  disabled={!isAdmin}
-                  className="mt-2 w-full rounded border border-mist px-2 py-1"
-                  step="0.01"
-                  value={config.deductions[key].amount ?? ''}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      deductions: {
-                        ...config.deductions,
-                        [key]: {
-                          ...config.deductions[key],
-                          amount: parseMoneyInput(e.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-ink/70">Deducted to date (₹)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    disabled={!isAdmin}
+                    className="mt-1 w-full rounded border border-mist px-2 py-1"
+                    step="0.01"
+                    value={config.deductions.esd.deductedToDate ?? 0}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        deductions: {
+                          ...config.deductions,
+                          esd: {
+                            ...config.deductions.esd,
+                            deductedToDate: parseMoneyInput(e.target.value),
+                          },
                         },
+                      })
+                    }
+                  />
+                </label>
+                <p className="sm:col-span-2 text-xs text-ink/60">
+                  Remaining balance preview: {money(preview.esdRemainingBalance)} · This month
+                  deduction: {money(preview.esd)}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded border border-mist p-3">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                disabled={!isAdmin}
+                checked={config.deductions.professionalTax.enabled}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    deductions: {
+                      ...config.deductions,
+                      professionalTax: {
+                        ...config.deductions.professionalTax,
+                        enabled: e.target.checked,
                       },
-                    })
-                  }
-                />
-              )}
-            </div>
-          ))}
+                    },
+                  })
+                }
+              />
+              Professional Tax
+            </label>
+            {config.deductions.professionalTax.enabled && (
+              <input
+                type="number"
+                min={0}
+                disabled={!isAdmin}
+                className="mt-2 w-full rounded border border-mist px-2 py-1"
+                step="0.01"
+                value={config.deductions.professionalTax.amount ?? ''}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    deductions: {
+                      ...config.deductions,
+                      professionalTax: {
+                        ...config.deductions.professionalTax,
+                        amount: parseMoneyInput(e.target.value),
+                      },
+                    },
+                  })
+                }
+              />
+            )}
+          </div>
         </div>
         {isAdmin && (
           <button
@@ -496,8 +608,8 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
           <div className="flex justify-between"><span>Gross Salary</span><span>{money(preview.grossSalary)}</span></div>
           <div className="flex justify-between text-green-700"><span>+ Total Allowances</span><span>{money(preview.totalAllowances)}</span></div>
           <div className="flex justify-between text-red-700"><span>- PF</span><span>{money(preview.pf)}</span></div>
-          <div className="flex justify-between text-red-700"><span>- TDS</span><span>{money(preview.tds)}</span></div>
-          <div className="flex justify-between text-red-700"><span>- Employee Security Deposit</span><span>{money(preview.esd)}</span></div>
+          <div className="flex justify-between text-red-700"><span>- TDS (1%)</span><span>{money(preview.tds)}</span></div>
+          <div className="flex justify-between text-red-700"><span>- Security Deposit</span><span>{money(preview.esd)}</span></div>
           <div className="flex justify-between text-red-700"><span>- Professional Tax</span><span>{money(preview.professionalTax)}</span></div>
           <div className="flex justify-between text-red-700"><span>- Other Deductions</span><span>{money(preview.otherDeductions)}</span></div>
           <div className="border-t border-mist my-2" />

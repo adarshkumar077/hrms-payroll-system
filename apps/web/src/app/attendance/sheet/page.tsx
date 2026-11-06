@@ -26,6 +26,8 @@ type SheetRow = {
   dailySalary: number;
   todaysEarnings: number | null;
   runningTotal: number;
+  hasCheckInSelfie?: boolean;
+  hasCheckOutSelfie?: boolean;
   checkInSelfieUrl?: string | null;
   checkOutSelfieUrl?: string | null;
   checkInMapsUrl?: string | null;
@@ -76,22 +78,66 @@ function earningsLabel(n: number | null) {
 
 function SelfieThumb({
   src,
+  hasPhoto,
+  employeeId,
+  date,
+  kind,
   label,
   onOpen,
 }: {
   src?: string | null;
+  hasPhoto?: boolean;
+  employeeId: string;
+  date: string;
+  kind: 'in' | 'out';
   label: string;
   onOpen: (url: string) => void;
 }) {
-  if (!src) return <span className="text-ink/40">—</span>;
+  const [loading, setLoading] = useState(false);
+  if (src) {
+    return (
+      <button type="button" onClick={() => onOpen(src)} title={label} className="shrink-0">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt={label}
+          loading="lazy"
+          decoding="async"
+          className="w-9 h-9 rounded object-cover border border-mist"
+        />
+      </button>
+    );
+  }
+  if (!hasPhoto) return <span className="text-ink/40">—</span>;
   return (
-    <button type="button" onClick={() => onOpen(src)} title={label} className="shrink-0">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={src}
-        alt={label}
-        className="w-9 h-9 rounded object-cover border border-mist"
-      />
+    <button
+      type="button"
+      disabled={loading}
+      title={label}
+      className="w-9 h-9 rounded border border-mist bg-slate-50 text-[10px] text-brand-700 hover:bg-brand-50 shrink-0 disabled:opacity-60"
+      onClick={async () => {
+        setLoading(true);
+        try {
+          const res = await api<{
+            record?: {
+              checkInSelfieUrl?: string | null;
+              checkOutSelfieUrl?: string | null;
+              selfieUrl?: string | null;
+            } | null;
+          }>(`/attendance/records/${employeeId}/${date}`, { retries: 0 });
+          const url =
+            kind === 'in'
+              ? res.record?.checkInSelfieUrl || res.record?.selfieUrl
+              : res.record?.checkOutSelfieUrl;
+          if (url) onOpen(url);
+        } catch {
+          /* ignore */
+        } finally {
+          setLoading(false);
+        }
+      }}
+    >
+      {loading ? '…' : 'Photo'}
     </button>
   );
 }
@@ -163,7 +209,7 @@ function AttendanceSheetInner() {
     const admin = isAdmin(u);
     setHr(admin);
     if (admin) {
-      api<{ items: EmpOption[] }>('/employees?pageSize=200&isActive=true')
+      api<{ items: EmpOption[] }>('/employees?pageSize=100&isActive=true', { retries: 0 })
         .then((res) => setEmployees(res.items ?? []))
         .catch(() => setEmployees([]));
     } else if (u.employeeId) {
@@ -171,8 +217,8 @@ function AttendanceSheetInner() {
     }
   }, [router]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     setError('');
     try {
       const q = new URLSearchParams({
@@ -180,13 +226,15 @@ function AttendanceSheetInner() {
         month: String(month),
       });
       if (employeeId) q.set('employeeId', employeeId);
-      const res = await api<SheetResponse>(`/attendance/sheet?${q}`);
+      const res = await api<SheetResponse>(`/attendance/sheet?${q}`, { retries: 0 });
       setRows(res.rows);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load sheet');
-      setRows([]);
+      if (!opts?.silent) {
+        setError(e instanceof Error ? e.message : 'Failed to load sheet');
+        setRows([]);
+      }
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, [year, month, employeeId]);
 
@@ -201,18 +249,24 @@ function AttendanceSheetInner() {
     return onAttendanceChanged((detail) => {
       if (!employeeId && hr) return;
       if (detail.employeeId && employeeId && detail.employeeId !== employeeId) return;
-      void load();
+      void load({ silent: true });
     });
   }, [employeeId, hr, load]);
 
-  // Soft refresh so punches from another device appear without a full page reload.
+  // Soft refresh for punches from another device (event-first; light poll as backup).
   useEffect(() => {
     if (!employeeId && hr) return;
-    const onFocus = () => void load();
+    let lastFocusLoad = 0;
+    const onFocus = () => {
+      const now = Date.now();
+      if (now - lastFocusLoad < 5_000) return;
+      lastFocusLoad = now;
+      void load({ silent: true });
+    };
     window.addEventListener('focus', onFocus);
     const id = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void load();
-    }, 15_000);
+      if (document.visibilityState === 'visible') void load({ silent: true });
+    }, 90_000);
     return () => {
       window.removeEventListener('focus', onFocus);
       window.clearInterval(id);
@@ -230,6 +284,8 @@ function AttendanceSheetInner() {
       hr ||
       rows.some(
         (r) =>
+          r.hasCheckInSelfie ||
+          r.hasCheckOutSelfie ||
           r.checkInSelfieUrl ||
           r.checkOutSelfieUrl ||
           (r.inLocation && r.inLocation !== '—') ||
@@ -440,7 +496,9 @@ function AttendanceSheetInner() {
           className="text-sm px-3 py-2 rounded border border-brand-300 hover:bg-brand-50 disabled:opacity-60"
           title={hr && !employeeId ? 'Select an employee first' : 'Export selected employee sheet to Excel'}
         >
-          {exporting === 'one' ? 'Exporting…' : 'Export Individual Employee'}
+          {exporting === 'one'
+            ? 'Exporting…'
+            : 'Export Individual Employee (Attendance & Payroll Excel)'}
         </button>
         {hr && (
           <button
@@ -448,9 +506,11 @@ function AttendanceSheetInner() {
             onClick={() => void exportSheetExcel('all')}
             disabled={!!exporting}
             className="text-sm px-3 py-2 rounded border border-brand-300 hover:bg-brand-50 disabled:opacity-60"
-            title="Export all employees for the selected month/year to one Excel file"
+            title="Professional multi-sheet Attendance & Payroll Excel for all employees (selected month/year)"
           >
-            {exporting === 'all' ? 'Exporting…' : 'Export All Employees'}
+            {exporting === 'all'
+              ? 'Exporting…'
+              : 'Export All Employees (Attendance & Payroll Excel)'}
           </button>
         )}
         {hr && (
@@ -575,12 +635,20 @@ function AttendanceSheetInner() {
                         <div className="flex items-center gap-1.5">
                           <SelfieThumb
                             src={r.checkInSelfieUrl}
+                            hasPhoto={r.hasCheckInSelfie}
+                            employeeId={r.employeeId}
+                            date={r.date}
+                            kind="in"
                             label="Check-in photo"
                             onOpen={setLightbox}
                           />
-                          {r.checkOutSelfieUrl ? (
+                          {r.hasCheckOutSelfie || r.checkOutSelfieUrl ? (
                             <SelfieThumb
                               src={r.checkOutSelfieUrl}
+                              hasPhoto={r.hasCheckOutSelfie}
+                              employeeId={r.employeeId}
+                              date={r.date}
+                              kind="out"
                               label="Check-out photo"
                               onOpen={setLightbox}
                             />

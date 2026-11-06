@@ -216,10 +216,12 @@ export default function DashboardPage() {
     // Critical path — paint dashboard KPIs ASAP on mobile LAN.
     Promise.allSettled([
       admin
-        ? api<HrDash>('/dashboard/hr', { timeoutMs: 10000 })
-        : api<EmpDash>('/dashboard/employee', { timeoutMs: 10000 }),
-      admin && ceoRole ? api<CeoDash>('/dashboard/ceo', { timeoutMs: 10000 }) : Promise.resolve(null),
-      api<Announcement[]>('/announcements', { retries: 0, timeoutMs: 8000 }),
+        ? api<HrDash>('/dashboard/hr', { timeoutMs: 20000, retries: 2 })
+        : api<EmpDash>('/dashboard/employee', { timeoutMs: 20000, retries: 2 }),
+      admin && ceoRole
+        ? api<CeoDash>('/dashboard/ceo', { timeoutMs: 20000, retries: 1 })
+        : Promise.resolve(null),
+      api<Announcement[]>('/announcements', { retries: 1, timeoutMs: 12000 }),
     ])
       .then((results) => {
         const [a, b, c] = results;

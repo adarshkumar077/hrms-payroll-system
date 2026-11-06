@@ -153,7 +153,20 @@ export class EmployeesService {
       this.prisma.employee.count({ where }),
       this.prisma.employee.findMany({
         where,
-        include: {
+        // List must not return photoUrl / heavy profile blobs.
+        select: {
+          id: true,
+          employeeCode: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          mobile: true,
+          department: true,
+          designation: true,
+          status: true,
+          isActive: true,
+          joinedAt: true,
+          reportingToId: true,
           user: { select: { id: true, status: true } },
           reportingTo: {
             select: { id: true, employeeCode: true, firstName: true, lastName: true },

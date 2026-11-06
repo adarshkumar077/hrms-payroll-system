@@ -7,6 +7,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
+import { calcDailySalary, calendarDaysInMonth } from '../payroll/payroll-calculator';
 
 const CACHE_TTL_MS = 5 * 60_000;
 
@@ -79,8 +80,11 @@ export class DashboardService {
       monthsOfService = Math.max(0, monthsOfService);
     }
     const plEligible = monthsOfService >= 7;
-    const dailySalary = payrollCfg?.dailySalary ?? 0;
     const monthlySalary = payrollCfg?.grossMonthly ?? 0;
+    const dailySalary = calcDailySalary(
+      monthlySalary,
+      calendarDaysInMonth(now.getFullYear(), now.getMonth() + 1),
+    );
 
     return {
       monthAttendanceDays: attendance,

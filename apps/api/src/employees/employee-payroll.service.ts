@@ -7,9 +7,11 @@ import {
   calcDailyEarning,
   calcDailySalary,
   calcPayrollPreview,
+  calendarDaysInMonth,
   defaultPayrollConfigJson,
   EmployeePayrollConfigJson,
   normalizePayrollConfig,
+  TDS_PERCENT,
 } from '../payroll/payroll-calculator';
 
 function roundMoney(value: number) {
@@ -21,7 +23,11 @@ export class EmployeePayrollService {
   constructor(private readonly prisma: PrismaService) {}
 
   private isHrOrCeo(user: AuthUser) {
-    return user.roles.includes(RoleCode.SUPER_ADMIN) || user.roles.includes(RoleCode.HR);
+    return (
+      user.roles.includes(RoleCode.SUPER_ADMIN) ||
+      user.roles.includes(RoleCode.HR) ||
+      user.roles.includes(RoleCode.ADMIN)
+    );
   }
 
   private async assertEmployee(companyId: string, employeeId: string) {
@@ -34,8 +40,9 @@ export class EmployeePayrollService {
     const base = defaultPayrollConfigJson();
     const d = dto.deductions;
     const pfEnabled = d.pf?.enabled ?? false;
-    const tdsEnabled = d.tds?.enabled ?? false;
     const esdEnabled = d.esd?.enabled ?? false;
+    const esdType = d.esd?.type === 'one_time' || d.esd?.type === 'custom' ? d.esd.type : 'monthly';
+    const esdAmount = d.esd?.amount ?? d.esd?.value ?? (esdEnabled ? 500 : base.deductions.esd.amount);
     return {
       allowances: {
         ...base.allowances,
@@ -50,16 +57,18 @@ export class EmployeePayrollService {
           mode: d.pf?.mode ?? 'fixed',
           value: d.pf?.value ?? d.pf?.amount ?? (pfEnabled ? 3600 : base.deductions.pf.value),
         },
+        // Mandatory 1% TDS for every employee.
         tds: {
-          ...base.deductions.tds,
-          ...(d.tds ?? {}),
-          enabled: tdsEnabled,
-          mode: d.tds?.mode ?? 'percent',
-          value: d.tds?.value ?? d.tds?.amount ?? (tdsEnabled ? 1 : base.deductions.tds.value),
+          enabled: true,
+          mode: 'percent',
+          value: TDS_PERCENT,
         },
         esd: {
           enabled: esdEnabled,
-          amount: d.esd?.amount ?? d.esd?.value ?? (esdEnabled ? 500 : base.deductions.esd.amount),
+          amount: esdAmount,
+          type: esdType,
+          totalAmount: d.esd?.totalAmount ?? esdAmount,
+          deductedToDate: Math.max(0, d.esd?.deductedToDate ?? 0),
         },
         professionalTax: {
           enabled: d.professionalTax?.enabled ?? false,
@@ -102,9 +111,12 @@ export class EmployeePayrollService {
     if (!this.isHrOrCeo(actor)) throw new ForbiddenException();
     await this.assertEmployee(actor.companyId, employeeId);
 
-    const workingDays = dto.workingDays ?? 30;
+    // Per-day salary always uses actual calendar days of the effective month (not fixed 30).
+    const eff = new Date(dto.effectiveFrom);
+    const calendarDays = calendarDaysInMonth(eff.getUTCFullYear(), eff.getUTCMonth() + 1);
+    const workingDays = dto.workingDays ?? calendarDays;
     const config = this.mergeConfigJson(dto);
-    const dailySalary = calcDailySalary(dto.grossMonthly, workingDays, dto.dailySalary);
+    const dailySalary = calcDailySalary(dto.grossMonthly, calendarDays);
     const preview = calcPayrollPreview({ grossMonthly: dto.grossMonthly, config });
 
     const data = {
@@ -194,10 +206,14 @@ export class EmployeePayrollService {
     const to = new Date(Date.UTC(y, m, 0));
 
     const configRow = await this.prisma.employeePayrollConfig.findUnique({ where: { employeeId } });
-    const config = (configRow?.configJson as EmployeePayrollConfigJson) ?? defaultPayrollConfigJson();
+    const config = normalizePayrollConfig(
+      (configRow?.configJson as EmployeePayrollConfigJson) ?? defaultPayrollConfigJson(),
+    );
     const grossMonthly = configRow?.grossMonthly ?? 0;
-    const workingDays = configRow?.workingDays ?? to.getUTCDate();
-    const dailySalary = configRow?.dailySalary ?? calcDailySalary(grossMonthly, workingDays);
+    const calendarDays = calendarDaysInMonth(y, m);
+    const workingDays = calendarDays;
+    // Always divide by actual calendar days of the selected month (ignore stale 30-day store).
+    const dailySalary = calcDailySalary(grossMonthly, calendarDays);
 
     const attendance = await this.prisma.attendanceRecord.findMany({
       where: { employeeId, date: { gte: from, lte: to } },

@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { getStoredUser, SessionUser, api } from '@/lib/api';
+import { getStoredUser, getToken, SessionUser, api } from '@/lib/api';
 import { canAccessPath } from '@/lib/navigation';
 import { isAdmin, ViewMode } from '@/lib/roles';
 import { Sidebar } from './Sidebar';
@@ -104,7 +104,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !getToken()) return;
     deferIdle(() => {
       api<{
         primaryColor?: string;

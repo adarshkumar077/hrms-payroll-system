@@ -38,6 +38,8 @@ type Row = {
     todaysEarnings?: number | null;
     checkOutSource?: string | null;
     checkOutLabel?: string | null;
+    hasCheckInSelfie?: boolean;
+    hasCheckOutSelfie?: boolean;
   } | null;
 };
 
@@ -563,6 +565,8 @@ function AttendanceConsoleInner() {
             {filteredRows.map((r) => {
               const selfie =
                 r.record?.checkInSelfieUrl || r.record?.selfieUrl || r.record?.checkOutSelfieUrl;
+              const hasPhoto =
+                !!selfie || !!r.record?.hasCheckInSelfie || !!r.record?.hasCheckOutSelfie;
               const loc = shortLocation(r.record?.checkInAddress || r.record?.checkOutAddress);
               return (
                 <tr key={r.employee.id} className="border-t border-mist">
@@ -591,8 +595,19 @@ function AttendanceConsoleInner() {
                         <img
                           src={selfie}
                           alt="Selfie"
+                          loading="lazy"
+                          decoding="async"
                           className="w-9 h-9 rounded object-cover border border-mist"
                         />
+                      </button>
+                    ) : hasPhoto ? (
+                      <button
+                        type="button"
+                        title="View photo"
+                        className="w-9 h-9 rounded border border-mist bg-slate-50 text-[10px] text-brand-700 hover:bg-brand-50"
+                        onClick={() => openDetail(r.employee.id, date)}
+                      >
+                        Photo
                       </button>
                     ) : (
                       '—'

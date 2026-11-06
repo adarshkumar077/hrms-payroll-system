@@ -14,7 +14,9 @@ import {
 import {
   calcDailySalary,
   calcPayrollPreview,
+  calendarDaysInMonth,
   defaultPayrollConfigJson,
+  TDS_PERCENT,
 } from '@/lib/payroll-calculator';
 
 type EmployeeRow = {
@@ -72,7 +74,7 @@ const emptyForm = () => ({
   dailySalary: '',
   salaryType: 'MONTHLY' as 'MONTHLY' | 'DAILY',
   salaryEffectiveFrom: new Date().toISOString().slice(0, 10),
-  workingDays: 30,
+  workingDays: calendarDaysInMonth(new Date().getFullYear(), new Date().getMonth() + 1),
   payrollConfig: defaultPayrollConfigJson(),
 });
 
@@ -554,23 +556,28 @@ export default function EmployeesPage() {
                     onChange={(e) => {
                       const grossMonthly = e.target.value;
                       const numericGross = parseMoneyInput(grossMonthly);
+                      const days = calendarDaysInMonth(
+                        new Date().getFullYear(),
+                        new Date().getMonth() + 1,
+                      );
                       setForm({
                         ...form,
                         grossMonthly,
-                        dailySalary: grossMonthly ? String(calcDailySalary(numericGross, form.workingDays)) : '',
+                        workingDays: days,
+                        dailySalary: grossMonthly ? String(calcDailySalary(numericGross, days)) : '',
                       });
                     }}
                   />
                 </label>
                 <label className="block text-sm">
-                  <span className="text-ink/70">Daily Salary</span>
+                  <span className="text-ink/70">Per-Day Salary (Gross ÷ calendar days)</span>
                   <input
                     type="number"
                     min={0}
                     step="0.01"
-                    className="mt-1 w-full rounded border border-mist px-3 py-2"
+                    className="mt-1 w-full rounded border border-mist px-3 py-2 bg-mist/40"
                     value={form.dailySalary}
-                    onChange={(e) => setForm({ ...form, dailySalary: e.target.value })}
+                    readOnly
                   />
                 </label>
                 <label className="block text-sm">
@@ -594,48 +601,158 @@ export default function EmployeesPage() {
                   />
                 </label>
               </div>
-              <div className="mt-2 flex flex-wrap gap-3 text-sm">
-                {(['pf', 'tds', 'esd'] as const).map((key) => (
-                  <label key={key} className="flex items-center gap-2">
+              <div className="mt-3 space-y-3 text-sm">
+                <div className="rounded border border-mist p-3">
+                  <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
-                      checked={
-                        key === 'esd'
-                          ? form.payrollConfig.deductions.esd.enabled
-                          : form.payrollConfig.deductions[key].enabled
+                      checked={form.payrollConfig.deductions.pf.enabled}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          payrollConfig: {
+                            ...form.payrollConfig,
+                            deductions: {
+                              ...form.payrollConfig.deductions,
+                              pf: {
+                                ...form.payrollConfig.deductions.pf,
+                                enabled: e.target.checked,
+                                mode: 'fixed',
+                                value: e.target.checked
+                                  ? form.payrollConfig.deductions.pf.value || 3600
+                                  : form.payrollConfig.deductions.pf.value,
+                              },
+                            },
+                          },
+                        })
                       }
-                      onChange={(e) => {
-                        const payrollConfig = { ...form.payrollConfig, deductions: { ...form.payrollConfig.deductions } };
-                        if (key === 'esd') {
-                          payrollConfig.deductions.esd = {
-                            ...payrollConfig.deductions.esd,
-                            enabled: e.target.checked,
-                            amount: e.target.checked ? 500 : payrollConfig.deductions.esd.amount,
-                          };
-                        } else {
-                          payrollConfig.deductions[key] = {
-                            ...payrollConfig.deductions[key],
-                            enabled: e.target.checked,
-                            mode: key === 'pf' ? 'fixed' : 'percent',
-                            value: key === 'pf' ? 3600 : 1,
-                          };
-                        }
-                        setForm({ ...form, payrollConfig });
-                      }}
                     />
-                    {key === 'pf' ? 'Enable PF' : key === 'tds' ? 'Enable TDS' : 'Enable Deposit'}
+                    Enable PF Deduction
                   </label>
-                ))}
+                  {form.payrollConfig.deductions.pf.enabled && (
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className="mt-2 w-full rounded border border-mist px-2 py-1"
+                      placeholder="Monthly PF amount"
+                      value={form.payrollConfig.deductions.pf.value ?? ''}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          payrollConfig: {
+                            ...form.payrollConfig,
+                            deductions: {
+                              ...form.payrollConfig.deductions,
+                              pf: {
+                                ...form.payrollConfig.deductions.pf,
+                                value: parseMoneyInput(e.target.value),
+                              },
+                            },
+                          },
+                        })
+                      }
+                    />
+                  )}
+                </div>
+
+                <div className="rounded border border-brand-200 bg-brand-50/40 p-3">
+                  <p className="font-medium text-brand-800">TDS {TDS_PERCENT}% — mandatory</p>
+                  <p className="text-xs text-ink/60">Applied automatically to every employee. Preview: ₹{salaryPreview.tds.toLocaleString('en-IN')}</p>
+                </div>
+
+                <div className="rounded border border-mist p-3">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={form.payrollConfig.deductions.esd.enabled}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          payrollConfig: {
+                            ...form.payrollConfig,
+                            deductions: {
+                              ...form.payrollConfig.deductions,
+                              esd: {
+                                ...form.payrollConfig.deductions.esd,
+                                enabled: e.target.checked,
+                                amount: e.target.checked
+                                  ? form.payrollConfig.deductions.esd.amount || 500
+                                  : form.payrollConfig.deductions.esd.amount,
+                                type: form.payrollConfig.deductions.esd.type || 'monthly',
+                              },
+                            },
+                          },
+                        })
+                      }
+                    />
+                    Enable Security Deposit
+                  </label>
+                  {form.payrollConfig.deductions.esd.enabled && (
+                    <div className="mt-2 grid sm:grid-cols-2 gap-2">
+                      <select
+                        className="rounded border border-mist px-2 py-1"
+                        value={form.payrollConfig.deductions.esd.type ?? 'monthly'}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            payrollConfig: {
+                              ...form.payrollConfig,
+                              deductions: {
+                                ...form.payrollConfig.deductions,
+                                esd: {
+                                  ...form.payrollConfig.deductions.esd,
+                                  type: e.target.value as 'monthly' | 'one_time' | 'custom',
+                                },
+                              },
+                            },
+                          })
+                        }
+                      >
+                        <option value="monthly">Fixed monthly</option>
+                        <option value="one_time">One-time</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        className="rounded border border-mist px-2 py-1"
+                        placeholder="Amount"
+                        value={form.payrollConfig.deductions.esd.amount ?? ''}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            payrollConfig: {
+                              ...form.payrollConfig,
+                              deductions: {
+                                ...form.payrollConfig.deductions,
+                                esd: {
+                                  ...form.payrollConfig.deductions.esd,
+                                  amount: parseMoneyInput(e.target.value),
+                                  totalAmount:
+                                    form.payrollConfig.deductions.esd.totalAmount ||
+                                    parseMoneyInput(e.target.value),
+                                },
+                              },
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
               {parseMoneyInput(form.grossMonthly) > 0 && (
                 <div className="mt-3 rounded border border-brand-100 bg-mist/30 p-3 text-sm">
                   <div className="flex justify-between"><span>Gross Salary</span><span>₹{salaryPreview.grossSalary.toLocaleString('en-IN')}</span></div>
-                  <div className="flex justify-between text-green-700"><span>+ Allowances</span><span>₹{salaryPreview.totalAllowances.toLocaleString('en-IN')}</span></div>
-                  <div className="flex justify-between text-red-700"><span>- Deductions</span><span>₹{salaryPreview.totalDeductions.toLocaleString('en-IN')}</span></div>
+                  <div className="flex justify-between text-red-700"><span>- PF</span><span>₹{salaryPreview.pf.toLocaleString('en-IN')}</span></div>
+                  <div className="flex justify-between text-red-700"><span>- Security Deposit</span><span>₹{salaryPreview.esd.toLocaleString('en-IN')}</span></div>
+                  <div className="flex justify-between text-red-700"><span>- TDS (1%)</span><span>₹{salaryPreview.tds.toLocaleString('en-IN')}</span></div>
                   <div className="flex justify-between font-semibold text-brand-700 mt-1"><span>Net Salary</span><span>₹{salaryPreview.netSalary.toLocaleString('en-IN')}</span></div>
                 </div>
               )}
-              <p className="text-xs text-ink/50 mt-2">Full allowances and deductions can be configured on the employee Salary tab after creation.</p>
+              <p className="text-xs text-ink/50 mt-2">Full allowances and deposit tracking can be edited on the employee Salary tab after creation.</p>
             </div>
 
             <label className="block text-sm">

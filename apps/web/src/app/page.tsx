@@ -114,6 +114,8 @@ export default function LoginPage() {
       }>('/auth/login', {
         method: 'POST',
         auth: false,
+        retries: 2,
+        timeoutMs: 20000,
         body: JSON.stringify({ identifier, password, totpCode: totpCode || undefined }),
       });
       setSession(data.accessToken, data.refreshToken, {

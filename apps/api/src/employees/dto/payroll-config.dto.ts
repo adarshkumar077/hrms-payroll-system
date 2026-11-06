@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsIn,
   IsNumber,
@@ -12,10 +13,19 @@ import {
 import { Type } from 'class-transformer';
 
 export class ToggleDeductionDto {
-  @IsOptional() enabled?: boolean;
+  @IsOptional() @IsBoolean() enabled?: boolean;
   @IsOptional() @IsIn(['percent', 'fixed']) mode?: 'percent' | 'fixed';
   @IsOptional() @IsNumber() value?: number;
   @IsOptional() @IsNumber() amount?: number;
+}
+
+export class EsdDeductionDto {
+  @IsOptional() @IsBoolean() enabled?: boolean;
+  @IsOptional() @IsNumber() @Min(0) amount?: number;
+  @IsOptional() @IsNumber() value?: number;
+  @IsOptional() @IsIn(['monthly', 'one_time', 'custom']) type?: 'monthly' | 'one_time' | 'custom';
+  @IsOptional() @IsNumber() @Min(0) totalAmount?: number;
+  @IsOptional() @IsNumber() @Min(0) deductedToDate?: number;
 }
 
 export class CustomDeductionDto {
@@ -46,7 +56,7 @@ export class AllowancesDto {
 export class DeductionsDto {
   @IsOptional() @ValidateNested() @Type(() => ToggleDeductionDto) pf?: ToggleDeductionDto;
   @IsOptional() @ValidateNested() @Type(() => ToggleDeductionDto) tds?: ToggleDeductionDto;
-  @IsOptional() @ValidateNested() @Type(() => ToggleDeductionDto) esd?: ToggleDeductionDto;
+  @IsOptional() @ValidateNested() @Type(() => EsdDeductionDto) esd?: EsdDeductionDto;
   @IsOptional() @ValidateNested() @Type(() => ToggleDeductionDto) professionalTax?: ToggleDeductionDto;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => CustomDeductionDto)
   custom?: CustomDeductionDto[];

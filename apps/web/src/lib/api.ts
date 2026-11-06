@@ -146,8 +146,8 @@ export function isConnectionError(err: unknown): boolean {
 }
 
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  // Cover Nest --watch recompiles (~5–15s) without infinite loops.
-  const maxRetries = Math.max(0, Math.min(options.retries ?? 3, 4));
+  // Default 1 retry covers brief Nest restarts without multiplying soft-poll traffic.
+  const maxRetries = Math.max(0, Math.min(options.retries ?? 1, 4));
   const delaysMs = [1200, 2500, 4000, 5000];
   let lastErr: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {

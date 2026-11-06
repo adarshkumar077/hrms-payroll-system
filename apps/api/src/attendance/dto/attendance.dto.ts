@@ -39,6 +39,9 @@ export class CorrectAttendanceDto {
   @IsOptional() @IsEnum(AttendanceMethod) method?: AttendanceMethod;
   @IsOptional() @IsNumber() overtimeMinutes?: number;
   @IsOptional() @IsNumber() todaysEarnings?: number;
+  /** Edit/clear late mark — triggers full month late-cycle recalculation */
+  @IsOptional() @IsBoolean() isLate?: boolean;
+  @IsOptional() @IsNumber() lateMinutes?: number;
   @IsOptional() @IsString() checkInAddress?: string;
   @IsOptional() @IsString() checkOutAddress?: string;
   @IsOptional() @IsString() checkInMapsUrl?: string;
