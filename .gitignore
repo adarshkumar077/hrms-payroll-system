@@ -35,3 +35,6 @@ apps/orbit/.next/
 apps/orbit/prisma/*.db
 apps/orbit/prisma/*.db-journal
 apps/orbit/.env
+
+# Real production secrets (local copy only, never commit)
+.env.production
