@@ -203,7 +203,7 @@ class OtherController {
   }
 }
 
-function guardCtx(handler: Function, cls: Function, reqUser: unknown) {
+function guardCtx(handler: (...args: never[]) => unknown, cls: abstract new (...args: never[]) => unknown, reqUser: unknown) {
   return {
     getHandler: () => handler,
     getClass: () => cls,
