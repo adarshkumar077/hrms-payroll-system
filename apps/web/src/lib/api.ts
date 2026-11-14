@@ -1,20 +1,23 @@
 export function getApiBaseUrl(): string {
   // Browser always uses same-origin `/api/v1` (Next.js rewrites to the API on the server).
-  // Works for http://localhost:3000, http://192.168.1.69:3000, and public tunnels —
+  // Works for localhost, your LAN address, and public tunnels —
   // never point the browser at localhost:3001 from another device.
   if (typeof window !== 'undefined') {
     const { protocol, hostname, port, origin } = window.location;
     if (!hostname) {
-      return 'http://192.168.1.69:3000/api/v1';
+      return '/api/v1';
     }
-    // Mobile UA stuck on a localhost bookmark would never reach the laptop API.
+    // Dev only: a phone stuck on a localhost bookmark would never reach the laptop API.
+    // Set NEXT_PUBLIC_LAN_HOST (e.g. your laptop's LAN IP) to redirect it there.
+    const lanHost = process.env.NEXT_PUBLIC_LAN_HOST;
     if (
+      lanHost &&
       (hostname === '127.0.0.1' || hostname === 'localhost') &&
       /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)
     ) {
       const p = port || (protocol === 'https:' ? '443' : '80');
       const hostPort = p === '80' || p === '443' ? '' : `:${p}`;
-      return `${protocol}//192.168.1.69${hostPort}/api/v1`;
+      return `${protocol}//${lanHost}${hostPort}/api/v1`;
     }
     return `${origin}/api/v1`;
   }

@@ -103,7 +103,7 @@ function startGetCurrentPosition(): Promise<GeolocationPosition> {
       reject(
         Object.assign(
           new Error(
-            'Camera and Location only work on a secure page (HTTPS). Open this app with https://localhost:3000, https://192.168.1.69:3000 (accept the certificate once), or the public Cloudflare HTTPS link — then tap Check In again.',
+            'Camera and Location only work on a secure page (HTTPS). Open this app with the HTTPS address of this site (on a local network, accept the certificate once) — then tap Check In again.',
           ),
           { code: -1, insecureContext: true },
         ),
@@ -275,7 +275,7 @@ export default function MarkAttendancePage() {
 
   function cameraFailureMessage(err: unknown): string {
     if (err && typeof err === 'object' && 'insecureContext' in err) {
-      return 'Camera needs HTTPS. Open https://192.168.1.69:3000 (or the public link), then try again.';
+      return 'Camera needs HTTPS. Open this site over https:// (or the public link), then try again.';
     }
     const name = err && typeof err === 'object' && 'name' in err ? String((err as { name: string }).name) : '';
     if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
@@ -611,8 +611,8 @@ export default function MarkAttendancePage() {
   const secureMarkUrl =
     publicHttpsUrl ||
     (typeof window !== 'undefined'
-      ? `https://${window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'localhost' : '192.168.1.69'}:3000/attendance/mark`
-      : 'https://192.168.1.69:3000/attendance/mark');
+      ? `https://${window.location.host}/attendance/mark`
+      : '/attendance/mark');
 
   return (
     <main className="max-w-lg mx-auto px-4 py-10">
