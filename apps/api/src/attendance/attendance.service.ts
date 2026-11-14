@@ -1368,7 +1368,8 @@ export class AttendanceService implements OnModuleInit {
           esd = preview.esd;
           tds = preview.tds;
           professionalTax = preview.professionalTax;
-          otherDeductions = r2(M.add(preview.otherDeductions, preview.professionalTax));
+          // ESI (employee) has no column of its own in the export, so it is counted with other deductions.
+          otherDeductions = r2(M.add(preview.otherDeductions, preview.professionalTax, preview.esi));
           esdRemainingBalance = preview.esdRemainingBalance;
           esdDeductedToDate = config.deductions.esd.deductedToDate ?? 0;
           esdEnabled = !!config.deductions.esd.enabled;

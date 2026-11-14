@@ -1,6 +1,7 @@
 import { PrismaClient, RoleCode, Prisma, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { DEFAULT_COMPANY_SETTINGS, DEFAULT_POLICIES } from '../src/company/default-settings';
+import { seedStatutoryRuleSets } from '../src/payroll/statutory/seed-rules';
 
 import { resolveBootstrapAdmin } from './bootstrap-admin';
 
@@ -80,6 +81,11 @@ async function main() {
       update: {},
     });
   }
+
+  // Statutory payroll rule tables (FY 2025-26, 2026-27). Idempotent; never overwrites edits.
+  // Defaults are marked verifyWithCA — VERIFY WITH CA BEFORE GO-LIVE (docs/PAYROLL-RULES.md).
+  const statutoryCreated = await seedStatutoryRuleSets(prisma, company.id);
+  if (statutoryCreated) console.log(`Seeded ${statutoryCreated} statutory rule set(s) — verify with your CA.`);
 
   const roleMap = await ensureRoles(company.id);
   const userCount = await prisma.user.count({ where: { companyId: company.id } });

@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { DEFAULT_COMPANY_SETTINGS } from '../src/company/default-settings';
+import { seedStatutoryRuleSets } from '../src/payroll/statutory/seed-rules';
 
 const prisma = new PrismaClient();
 
@@ -45,7 +46,12 @@ async function main() {
         },
       });
     }
-    console.log(`Synced settings for company ${company.id}`);
+    // Default statutory rule tables; existing (possibly CA-edited) rows are left untouched.
+    const statutoryCreated = await seedStatutoryRuleSets(prisma, company.id);
+    console.log(
+      `Synced settings for company ${company.id}` +
+        (statutoryCreated ? ` (+${statutoryCreated} statutory rule set(s), verify with CA)` : ''),
+    );
   }
 }
 

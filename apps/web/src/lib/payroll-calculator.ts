@@ -1,4 +1,9 @@
-export type DeductionMode = 'percent' | 'fixed';
+/**
+ * percent / fixed = manual override; statutory = computed by the API's statutory engine
+ * (income-tax slabs, PF, ESI, PT rule tables). The local preview cannot compute statutory
+ * amounts — use the API preview (POST /employees/:id/payroll-config/preview) for those.
+ */
+export type DeductionMode = 'percent' | 'fixed' | 'statutory';
 
 export type ToggleDeduction = {
   enabled: boolean;
@@ -48,10 +53,12 @@ export type EmployeePayrollConfigJson = {
   };
   deductions: {
     pf: ToggleDeduction;
-    /** Always applied at 1% of applicable salary — enable flag kept for legacy JSON. */
+    /** statutory = income-tax slab engine (server); fixed = manual monthly TDS. */
     tds: ToggleDeduction;
+    /** Employee State Insurance (employee share). */
+    esi: ToggleDeduction;
     esd: EsdDeduction;
-    professionalTax: { enabled: boolean; amount: number };
+    professionalTax: { enabled: boolean; amount: number; mode?: 'statutory' | 'fixed' };
     custom: CustomDeduction[];
   };
 };
@@ -61,6 +68,7 @@ export type PayrollPreview = {
   totalAllowances: number;
   pf: number;
   tds: number;
+  esi?: number;
   esd: number;
   professionalTax: number;
   otherDeductions: number;
@@ -68,11 +76,40 @@ export type PayrollPreview = {
   netSalary: number;
   esdRemainingBalance: number;
   esdDeductedToDate: number;
+  /** Server preview only. */
+  employerPfEps?: number;
+  employerPfEpf?: number;
+  employerEsi?: number;
+  /** Local preview: true when some deductions are statutory and therefore not included. */
+  statutoryPending?: boolean;
+  statutory?: {
+    financialYear: string;
+    verifyWithCA: boolean;
+    taxRegime: 'NEW' | 'OLD';
+    monthlyGross: number;
+    tds: { projectedAnnualGross: number; taxableIncome: number; annualTax: number } | null;
+    esi: { applicable: boolean; basis: string } | null;
+    pt: { state: string; amount: number } | null;
+  };
 };
 
-const PF_DEFAULT_AMOUNT = 3600;
+export const TAX_REGIMES = [
+  { value: 'NEW', label: 'New regime (default)' },
+  { value: 'OLD', label: 'Old regime' },
+] as const;
+
+export const PT_STATES = [
+  { value: 'NONE', label: 'None / not applicable' },
+  { value: 'MH', label: 'Maharashtra' },
+  { value: 'KA', label: 'Karnataka' },
+  { value: 'WB', label: 'West Bengal' },
+  { value: 'TN', label: 'Tamil Nadu' },
+  { value: 'TS', label: 'Telangana' },
+  { value: 'AP', label: 'Andhra Pradesh' },
+  { value: 'GJ', label: 'Gujarat' },
+] as const;
+
 const ESD_DEFAULT_AMOUNT = 500;
-export const TDS_PERCENT = 1;
 
 function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -99,9 +136,9 @@ export function defaultPayrollConfigJson(): EmployeePayrollConfigJson {
       custom: [],
     },
     deductions: {
-      pf: { enabled: false, mode: 'fixed', value: PF_DEFAULT_AMOUNT },
-      // Mandatory 1% TDS — always on for new configs.
-      tds: { enabled: true, mode: 'percent', value: TDS_PERCENT },
+      pf: { enabled: false, mode: 'statutory', value: 0 },
+      tds: { enabled: true, mode: 'statutory' },
+      esi: { enabled: false, mode: 'statutory' },
       esd: {
         enabled: false,
         amount: ESD_DEFAULT_AMOUNT,
@@ -109,7 +146,7 @@ export function defaultPayrollConfigJson(): EmployeePayrollConfigJson {
         totalAmount: ESD_DEFAULT_AMOUNT,
         deductedToDate: 0,
       },
-      professionalTax: { enabled: false, amount: 0 },
+      professionalTax: { enabled: true, mode: 'statutory', amount: 0 },
       custom: [],
     },
   };
@@ -144,16 +181,25 @@ export function normalizePayrollConfig(
       custom: Array.isArray(a.custom) ? a.custom : [],
     },
     deductions: {
-      pf: { ...base.deductions.pf, ...(d.pf ?? {}) },
-      tds: {
-        ...base.deductions.tds,
-        ...(d.tds ?? {}),
-        enabled: true,
-        mode: 'percent',
-        value: TDS_PERCENT,
-      },
+      // Mirrors the API's normalizePayrollConfig (apps/api/src/payroll/payroll-calculator.ts).
+      pf: d.pf
+        ? { ...base.deductions.pf, ...d.pf, enabled: !!d.pf.enabled, mode: d.pf.mode ?? 'statutory' }
+        : base.deductions.pf,
+      tds:
+        d.tds?.mode === 'fixed'
+          ? { enabled: d.tds.enabled !== false, mode: 'fixed', value: d.tds.value ?? d.tds.amount ?? 0 }
+          : { enabled: d.tds?.enabled !== false, mode: 'statutory' },
+      esi: { ...base.deductions.esi, ...(d.esi ?? {}) },
       esd: normalizeEsd(d.esd as Partial<EsdDeduction>),
-      professionalTax: { ...base.deductions.professionalTax, ...(d.professionalTax ?? {}) },
+      professionalTax: d.professionalTax
+        ? {
+            enabled: d.professionalTax.enabled ?? true,
+            amount: Number(d.professionalTax.amount ?? 0) || 0,
+            mode:
+              d.professionalTax.mode ??
+              ((Number(d.professionalTax.amount ?? 0) || 0) > 0 ? 'fixed' : 'statutory'),
+          }
+        : base.deductions.professionalTax,
       custom: Array.isArray(d.custom) ? d.custom : [],
     },
   };
@@ -170,15 +216,11 @@ export function calcDailySalary(grossMonthly: number, calendarDays = 30, overrid
   return roundMoney(grossMonthly / calendarDays);
 }
 
+/** Manual (fixed / percent) deduction; statutory amounts are computed by the API, so 0 here. */
 function calcToggleDeduction(base: number, item?: ToggleDeduction | null) {
-  if (!item?.enabled) return 0;
+  if (!item?.enabled || item.mode === 'statutory') return 0;
   if (item.mode === 'percent') return roundMoney((base * (item.value ?? 0)) / 100);
   return roundMoney(item.value ?? item.amount ?? 0);
-}
-
-/** Mandatory 1% TDS on applicable monthly salary (gross). */
-export function calcMandatoryTds(applicableMonthlySalary: number) {
-  return roundMoney((Math.max(0, applicableMonthlySalary) * TDS_PERCENT) / 100);
 }
 
 /**
@@ -263,20 +305,26 @@ export function calcPayrollPreview(input: {
     (a.special ?? 0) +
     (a.custom ?? []).reduce((s, c) => s + (c.amount ?? 0), 0);
 
-  const pf = calcToggleDeduction(grossMonthly, config.deductions.pf);
-  // Mandatory 1% TDS for every employee — never skip / never duplicate via toggle off.
-  const tds = calcMandatoryTds(grossMonthly);
-  const esdCalc = calcEsdForMonth(config.deductions.esd);
+  const d = config.deductions;
+  const grossWithAllowancesForPct = grossMonthly + totalAllowances;
+  const pf = calcToggleDeduction(grossMonthly, d.pf);
+  const tds = calcToggleDeduction(grossWithAllowancesForPct, d.tds);
+  const esi = calcToggleDeduction(grossWithAllowancesForPct, d.esi);
+  const esdCalc = calcEsdForMonth(d.esd);
   const esd = esdCalc.amount;
-  const professionalTax = config.deductions.professionalTax.enabled
-    ? roundMoney(config.deductions.professionalTax.amount ?? 0)
-    : 0;
+  const professionalTax =
+    d.professionalTax.enabled && d.professionalTax.mode === 'fixed'
+      ? roundMoney(d.professionalTax.amount ?? 0)
+      : 0;
+  const statutoryPending = [d.pf, d.tds, d.esi, d.professionalTax].some(
+    (x) => x.enabled && (x.mode ?? 'statutory') === 'statutory',
+  );
   const otherDeductions = (config.deductions.custom ?? []).reduce(
     (s, c) => s + (c.amount ?? 0),
     0,
   );
 
-  let totalDeductions = pf + tds + esd + professionalTax + otherDeductions;
+  let totalDeductions = pf + tds + esi + esd + professionalTax + otherDeductions;
   const grossWithAllowances = grossMonthly + totalAllowances;
   if (totalDeductions > grossWithAllowances) {
     totalDeductions = grossWithAllowances;
@@ -288,6 +336,7 @@ export function calcPayrollPreview(input: {
     totalAllowances: roundMoney(totalAllowances),
     pf: roundMoney(pf),
     tds: roundMoney(tds),
+    esi: roundMoney(esi),
     esd: roundMoney(esd),
     professionalTax: roundMoney(professionalTax),
     otherDeductions: roundMoney(otherDeductions),
@@ -295,12 +344,13 @@ export function calcPayrollPreview(input: {
     netSalary,
     esdRemainingBalance: esdCalc.remainingBalance,
     esdDeductedToDate: Math.max(0, (config.deductions.esd.deductedToDate ?? 0)),
+    statutoryPending,
   };
 }
 
 /**
  * Final net payable for an attendance month (gross-based settlement).
- * HD deductions are applied once (normal vs late split); PF/ESD only when enabled; TDS always 1%.
+ * HD deductions are applied once (normal vs late split); PF/ESD only when enabled.
  */
 export function calcMonthNetPayable(input: {
   grossMonthly: number;

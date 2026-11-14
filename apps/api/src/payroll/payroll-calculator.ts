@@ -1,6 +1,21 @@
 import * as M from '../common/money';
+import {
+  computeEsi,
+  computeMonthlyTds,
+  computePf,
+  computePt,
+  defaultStatutoryRules,
+  financialYearOf,
+  StatutoryRules,
+  TaxRegimeCode,
+} from './statutory';
 
-export type DeductionMode = 'percent' | 'fixed';
+/**
+ * percent   = % of monthly gross (legacy manual override)
+ * fixed     = fixed monthly amount (manual override)
+ * statutory = computed by the statutory engine (src/payroll/statutory) from the rule tables
+ */
+export type DeductionMode = 'percent' | 'fixed' | 'statutory';
 
 export type ToggleDeduction = {
   enabled: boolean;
@@ -50,12 +65,62 @@ export type EmployeePayrollConfigJson = {
   };
   deductions: {
     pf: ToggleDeduction;
-    /** Always applied at 1% of applicable salary — enable flag kept for legacy JSON. */
+    /** Income-tax TDS. statutory = slab engine; fixed = manual monthly amount. */
     tds: ToggleDeduction;
+    /** Employee State Insurance (employee share). */
+    esi: ToggleDeduction;
     esd: EsdDeduction;
-    professionalTax: { enabled: boolean; amount: number };
+    professionalTax: { enabled: boolean; amount: number; mode?: 'statutory' | 'fixed' };
     custom: CustomDeduction[];
   };
+};
+
+/** Statutory inputs for one employee and one payroll month. */
+export type StatutoryContext = {
+  rules: StatutoryRules;
+  year: number;
+  month: number;
+  taxRegime?: TaxRegimeCode;
+  /** Old regime: declared annual 80C/80D/… total. */
+  declaredDeductions?: M.MoneyInput;
+  ptState?: string | null;
+  gender?: string | null;
+  /** Taxable / ESI / PT gross for the month. Default: gross + allowances. */
+  monthlyGross?: M.MoneyInput;
+  /** Basic + DA for PF. Default: allowances.basic, else gross. */
+  pfWage?: M.MoneyInput;
+  /** Approved payroll earlier in this FY. */
+  priorTaxableGross?: M.MoneyInput;
+  priorTdsDeducted?: M.MoneyInput;
+  priorProfessionalTax?: M.MoneyInput;
+  /** ESI decision fixed at the start of the contribution period (null = decide on this month's gross). */
+  esiPeriodEligible?: boolean | null;
+};
+
+export type StatutoryMode = 'statutory' | 'fixed' | 'percent' | 'off';
+
+/** JSON-friendly statutory breakdown (stored on payroll_lines.statutory_json). */
+export type StatutoryDetail = {
+  financialYear: string;
+  verifyWithCA: boolean;
+  taxRegime: TaxRegimeCode;
+  monthlyGross: number;
+  modes: { pf: StatutoryMode; esi: StatutoryMode; tds: StatutoryMode; pt: StatutoryMode };
+  pf: { actualWage: number; pfWage: number; employee: number; employerEps: number; employerEpf: number } | null;
+  esi: { applicable: boolean; basis: string; employee: number; employer: number } | null;
+  pt: { state: string; amount: number; knownState: boolean } | null;
+  tds: {
+    projectedAnnualGross: number;
+    taxableIncome: number;
+    annualTax: number;
+    slabTax: number;
+    rebate: number;
+    surcharge: number;
+    cess: number;
+    priorTdsDeducted: number;
+    monthsRemaining: number;
+    monthlyTds: number;
+  } | null;
 };
 
 export type PayrollPreview = {
@@ -63,6 +128,8 @@ export type PayrollPreview = {
   totalAllowances: number;
   pf: number;
   tds: number;
+  /** ESI employee share. */
+  esi: number;
   esd: number;
   professionalTax: number;
   otherDeductions: number;
@@ -70,10 +137,18 @@ export type PayrollPreview = {
   netSalary: number;
   esdRemainingBalance: number;
   esdDeductedToDate: number;
+  /** Employer contributions (cost to company, not deducted from the employee). */
+  employerPfEps: number;
+  employerPfEpf: number;
+  employerEsi: number;
+  statutory: StatutoryDetail;
 };
 
-const PF_DEFAULT_AMOUNT = 3600;
 const ESD_DEFAULT_AMOUNT = 500;
+/**
+ * @deprecated The flat 1% TDS was replaced by the slab engine (T9). Kept only so legacy
+ * `{ mode: 'percent', value: 1 }` TDS JSON can be recognised; it now migrates to `statutory`.
+ */
 export const TDS_PERCENT = 1;
 
 /**
@@ -106,9 +181,10 @@ export function defaultPayrollConfigJson(): EmployeePayrollConfigJson {
       custom: [],
     },
     deductions: {
-      pf: { enabled: false, mode: 'fixed', value: PF_DEFAULT_AMOUNT },
-      // Mandatory 1% TDS — always on for new configs.
-      tds: { enabled: true, mode: 'percent', value: TDS_PERCENT },
+      pf: { enabled: false, mode: 'statutory', value: 0 },
+      // TDS on by default, computed from the income-tax slabs.
+      tds: { enabled: true, mode: 'statutory' },
+      esi: { enabled: false, mode: 'statutory' },
       esd: {
         enabled: false,
         amount: ESD_DEFAULT_AMOUNT,
@@ -116,7 +192,8 @@ export function defaultPayrollConfigJson(): EmployeePayrollConfigJson {
         totalAmount: ESD_DEFAULT_AMOUNT,
         deductedToDate: 0,
       },
-      professionalTax: { enabled: false, amount: 0 },
+      // PT on by default; 0 until the employee's PT state is set.
+      professionalTax: { enabled: true, mode: 'statutory', amount: 0 },
       custom: [],
     },
   };
@@ -151,19 +228,46 @@ export function normalizePayrollConfig(
       custom: Array.isArray(a.custom) ? a.custom : [],
     },
     deductions: {
-      pf: { ...base.deductions.pf, ...(d.pf ?? {}) },
-      tds: {
-        ...base.deductions.tds,
-        ...(d.tds ?? {}),
-        enabled: true,
-        mode: 'percent',
-        value: TDS_PERCENT,
-      },
+      pf: normalizePf(d.pf),
+      tds: normalizeTds(d.tds),
+      esi: { ...base.deductions.esi, ...(d.esi ?? {}) },
       esd: normalizeEsd(d.esd as Partial<EsdDeduction>),
-      professionalTax: { ...base.deductions.professionalTax, ...(d.professionalTax ?? {}) },
+      professionalTax: normalizePt(d.professionalTax),
       custom: Array.isArray(d.custom) ? d.custom : [],
     },
   };
+}
+
+/** Legacy PF JSON keeps its mode (fixed / percent = manual override); a missing mode = statutory. */
+function normalizePf(raw?: Partial<ToggleDeduction> | null): ToggleDeduction {
+  const base = defaultPayrollConfigJson().deductions.pf;
+  if (!raw || typeof raw !== 'object') return { ...base };
+  return { ...base, ...raw, enabled: !!raw.enabled, mode: raw.mode ?? 'statutory' };
+}
+
+/**
+ * Legacy TDS JSON was forced to `{ enabled: true, mode: 'percent', value: 1 }` (flat 1%).
+ * That was never a per-employee choice, so it migrates to the slab engine. `fixed` is kept
+ * as a manual override.
+ */
+function normalizeTds(raw?: Partial<ToggleDeduction> | null): ToggleDeduction {
+  if (!raw || typeof raw !== 'object') return { enabled: true, mode: 'statutory' };
+  if (raw.mode === 'fixed') {
+    return { enabled: raw.enabled !== false, mode: 'fixed', value: raw.value ?? raw.amount ?? 0 };
+  }
+  return { enabled: raw.enabled !== false, mode: 'statutory' };
+}
+
+/** Legacy PT JSON had no mode: a positive amount stays a fixed override, otherwise statutory. */
+function normalizePt(
+  raw?: Partial<EmployeePayrollConfigJson['deductions']['professionalTax']> | null,
+): EmployeePayrollConfigJson['deductions']['professionalTax'] {
+  const base = defaultPayrollConfigJson().deductions.professionalTax;
+  if (!raw || typeof raw !== 'object') return { ...base };
+  const amount = Number(raw.amount ?? 0) || 0;
+  const mode =
+    raw.mode === 'fixed' || raw.mode === 'statutory' ? raw.mode : amount > 0 ? 'fixed' : 'statutory';
+  return { enabled: raw.enabled ?? base.enabled, amount, mode };
 }
 
 /**
@@ -194,9 +298,36 @@ function calcToggleDeduction(base: M.MoneyInput, item?: ToggleDeduction | null) 
   return roundMoney(item.value ?? item.amount ?? 0);
 }
 
-/** Mandatory 1% TDS on applicable monthly salary (gross). */
+/** Default statutory context: built-in rules for the current FY, new regime, no PT state, steady state. */
+export function defaultStatutoryContext(now = new Date()): StatutoryContext {
+  const fy = financialYearOf(now.getFullYear(), now.getMonth() + 1);
+  // Steady-state estimate: treat the month as April (12 months to go, nothing paid yet),
+  // so monthly TDS = annual tax ÷ 12.
+  return { rules: defaultStatutoryRules(fy), year: Number(fy.slice(0, 4)), month: 4, taxRegime: 'NEW' };
+}
+
+/**
+ * Estimated monthly TDS for a monthly taxable gross (gross × 12 annualised, monthly = annual tax ÷ 12,
+ * nearest rupee). Default rules: new regime. Replaces the old flat 1% TDS.
+ */
+export function calcEstimatedMonthlyTds(
+  monthlyGross: M.MoneyInput,
+  ctx: StatutoryContext = defaultStatutoryContext(),
+) {
+  return roundMoney(
+    computeMonthlyTds({
+      regime: ctx.taxRegime ?? 'NEW',
+      rules: ctx.rules,
+      month: ctx.month,
+      monthlyTaxableGross: M.nonNegative(monthlyGross),
+      declaredDeductions: ctx.declaredDeductions,
+    }).monthlyTds,
+  );
+}
+
+/** @deprecated Old name of calcEstimatedMonthlyTds (was a flat 1%; now the slab engine). */
 export function calcMandatoryTds(applicableMonthlySalary: M.MoneyInput) {
-  return roundMoney(M.percentOf(M.nonNegative(applicableMonthlySalary), TDS_PERCENT));
+  return calcEstimatedMonthlyTds(applicableMonthlySalary);
 }
 
 /**
@@ -263,12 +394,29 @@ export function calcEsdForMonth(esdInput?: Partial<EsdDeduction> | null): {
   };
 }
 
+function modeOf(item: { enabled: boolean; mode?: DeductionMode } | undefined): StatutoryMode {
+  if (!item?.enabled) return 'off';
+  return item.mode ?? 'statutory';
+}
+
+/**
+ * Payroll preview / statutory calculation for one employee-month.
+ *
+ * PF, ESI, TDS and PT each follow the employee's toggle: off → 0; fixed / percent → the manual
+ * override; statutory → the rule-table engine (src/payroll/statutory). Without a `statutory`
+ * context the built-in defaults are used (new regime, no PT state, steady-state TDS).
+ */
 export function calcPayrollPreview(input: {
   grossMonthly: M.MoneyInput;
   config: EmployeePayrollConfigJson;
+  statutory?: StatutoryContext;
 }): PayrollPreview {
   const config = normalizePayrollConfig(input.config);
+  const ctx = input.statutory ?? defaultStatutoryContext();
+  const rules = ctx.rules;
+  const regime: TaxRegimeCode = ctx.taxRegime ?? 'NEW';
   const a = config.allowances;
+  const d = config.deductions;
   // Each line item is rounded to 2dp first; totals are exact sums of the rounded lines.
   const r2 = M.round2;
   const totalAllowances = M.add(
@@ -285,18 +433,111 @@ export function calcPayrollPreview(input: {
   );
 
   const gross = r2(input.grossMonthly);
-  const pf = M.money(calcToggleDeduction(gross, config.deductions.pf));
-  // Mandatory 1% TDS for every employee — never skip / never duplicate via toggle off.
-  const tds = M.money(calcMandatoryTds(gross));
-  const esdCalc = calcEsdForMonth(config.deductions.esd);
-  const esd = M.money(esdCalc.amount);
-  const professionalTax = config.deductions.professionalTax.enabled
-    ? r2(config.deductions.professionalTax.amount ?? 0)
-    : M.money(0);
-  const otherDeductions = M.sumBy(config.deductions.custom ?? [], (c) => r2(c.amount));
-
-  let totalDeductions = M.add(pf, tds, esd, professionalTax, otherDeductions);
   const grossWithAllowances = gross.plus(totalAllowances);
+  const statGross = r2(M.nonNegative(ctx.monthlyGross ?? grossWithAllowances));
+  const pfWageInput = ctx.pfWage ?? (M.money(a.basic).greaterThan(0) ? a.basic : gross);
+  const zero = M.money(0);
+
+  const modes = {
+    pf: modeOf(d.pf),
+    esi: modeOf(d.esi),
+    tds: modeOf(d.tds),
+    pt: modeOf(d.professionalTax),
+  };
+
+  // PF (employee share deducted; employer EPS/EPF reported separately)
+  let pf = zero;
+  let employerPfEps = zero;
+  let employerPfEpf = zero;
+  let pfDetail: StatutoryDetail['pf'] = null;
+  if (modes.pf === 'statutory') {
+    const res = computePf({ basicPlusDa: pfWageInput, rules });
+    pf = res.employee;
+    employerPfEps = res.employerEps;
+    employerPfEpf = res.employerEpf;
+    pfDetail = {
+      actualWage: roundMoney(res.actualWage),
+      pfWage: roundMoney(res.pfWage),
+      employee: roundMoney(res.employee),
+      employerEps: roundMoney(res.employerEps),
+      employerEpf: roundMoney(res.employerEpf),
+    };
+  } else if (modes.pf !== 'off') {
+    pf = M.money(calcToggleDeduction(gross, d.pf));
+  }
+
+  // ESI
+  let esi = zero;
+  let employerEsi = zero;
+  let esiDetail: StatutoryDetail['esi'] = null;
+  if (modes.esi === 'statutory') {
+    const res = computeEsi({ monthlyGross: statGross, rules, periodEligible: ctx.esiPeriodEligible });
+    esi = res.employee;
+    employerEsi = res.employer;
+    esiDetail = {
+      applicable: res.applicable,
+      basis: res.basis,
+      employee: roundMoney(res.employee),
+      employer: roundMoney(res.employer),
+    };
+  } else if (modes.esi !== 'off') {
+    esi = M.money(calcToggleDeduction(statGross, d.esi));
+  }
+
+  // Professional tax
+  let professionalTax = zero;
+  let ptDetail: StatutoryDetail['pt'] = null;
+  if (modes.pt === 'statutory') {
+    const res = computePt({
+      monthlyGross: statGross,
+      stateCode: ctx.ptState,
+      month: ctx.month,
+      rules,
+      gender: ctx.gender,
+    });
+    professionalTax = res.amount;
+    ptDetail = { state: res.stateCode, amount: roundMoney(res.amount), knownState: res.known };
+  } else if (modes.pt !== 'off') {
+    professionalTax = r2(d.professionalTax.amount ?? 0);
+  }
+
+  // TDS (after PT, which the old regime deducts u/s 16(iii))
+  let tds = zero;
+  let tdsDetail: StatutoryDetail['tds'] = null;
+  if (modes.tds === 'statutory') {
+    const res = computeMonthlyTds({
+      regime,
+      rules,
+      month: ctx.month,
+      monthlyTaxableGross: statGross,
+      priorTaxableGross: ctx.priorTaxableGross,
+      priorTdsDeducted: ctx.priorTdsDeducted,
+      declaredDeductions: ctx.declaredDeductions,
+      monthlyProfessionalTax: professionalTax,
+      priorProfessionalTax: ctx.priorProfessionalTax,
+    });
+    tds = res.monthlyTds;
+    tdsDetail = {
+      projectedAnnualGross: roundMoney(res.projectedAnnualGross),
+      taxableIncome: roundMoney(res.annualTax.taxableIncome),
+      annualTax: roundMoney(res.annualTax.totalTax),
+      slabTax: roundMoney(res.annualTax.slabTax),
+      rebate: roundMoney(res.annualTax.rebate),
+      surcharge: roundMoney(res.annualTax.surcharge),
+      cess: roundMoney(res.annualTax.cess),
+      priorTdsDeducted: roundMoney(res.priorTdsDeducted),
+      monthsRemaining: res.monthsRemaining,
+      monthlyTds: roundMoney(res.monthlyTds),
+    };
+  } else if (modes.tds !== 'off') {
+    tds = M.money(calcToggleDeduction(statGross, d.tds));
+  }
+
+  const esdCalc = calcEsdForMonth(d.esd);
+  const esd = M.money(esdCalc.amount);
+  const otherDeductions = M.sumBy(d.custom ?? [], (c) => r2(c.amount));
+
+  let totalDeductions = M.add(pf, esi, tds, esd, professionalTax, otherDeductions);
   if (totalDeductions.greaterThan(grossWithAllowances)) {
     totalDeductions = grossWithAllowances;
   }
@@ -307,19 +548,34 @@ export function calcPayrollPreview(input: {
     totalAllowances: roundMoney(totalAllowances),
     pf: roundMoney(pf),
     tds: roundMoney(tds),
+    esi: roundMoney(esi),
     esd: roundMoney(esd),
     professionalTax: roundMoney(professionalTax),
     otherDeductions: roundMoney(otherDeductions),
     totalDeductions: roundMoney(totalDeductions),
     netSalary,
     esdRemainingBalance: esdCalc.remainingBalance,
-    esdDeductedToDate: roundMoney(M.nonNegative(config.deductions.esd.deductedToDate ?? 0)),
+    esdDeductedToDate: roundMoney(M.nonNegative(d.esd.deductedToDate ?? 0)),
+    employerPfEps: roundMoney(employerPfEps),
+    employerPfEpf: roundMoney(employerPfEpf),
+    employerEsi: roundMoney(employerEsi),
+    statutory: {
+      financialYear: rules.financialYear,
+      verifyWithCA: rules.verifyWithCA,
+      taxRegime: regime,
+      monthlyGross: roundMoney(statGross),
+      modes,
+      pf: pfDetail,
+      esi: esiDetail,
+      pt: ptDetail,
+      tds: tdsDetail,
+    },
   };
 }
 
 /**
  * Final net payable for an attendance month (gross-based settlement).
- * HD deductions are applied once (normal vs late split); PF/ESD only when enabled; TDS always 1%.
+ * HD deductions are applied once (normal vs late split); PF/ESD only when enabled.
  */
 export function calcMonthNetPayable(input: {
   grossMonthly: M.MoneyInput;

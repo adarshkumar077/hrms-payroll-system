@@ -9,7 +9,9 @@ import {
   defaultPayrollConfigJson,
   normalizePayrollConfig,
   EmployeePayrollConfigJson,
-  TDS_PERCENT,
+  PayrollPreview,
+  PT_STATES,
+  TAX_REGIMES,
 } from '@/lib/payroll-calculator';
 
 type Props = {
@@ -54,6 +56,10 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
     return calendarDaysInMonth(n.getFullYear(), n.getMonth() + 1);
   });
   const [config, setConfig] = useState<EmployeePayrollConfigJson>(defaultPayrollConfigJson());
+  const [taxRegime, setTaxRegime] = useState<'NEW' | 'OLD'>('NEW');
+  const [declaredDeductions, setDeclaredDeductions] = useState('');
+  const [ptState, setPtState] = useState('NONE');
+  const [serverPreview, setServerPreview] = useState<PayrollPreview | null>(null);
   const calendarDaysNow = useMemo(() => {
     const n = new Date();
     return calendarDaysInMonth(n.getFullYear(), n.getMonth() + 1);
@@ -91,6 +97,10 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
         effectiveFrom: string;
         workingDays: number;
         config: EmployeePayrollConfigJson;
+        taxRegime?: 'NEW' | 'OLD';
+        oldRegimeDeclaredDeductions?: number | null;
+        ptState?: string | null;
+        preview?: PayrollPreview;
       }>(`/employees/${employeeId}/payroll-config`),
       api<{ year: number; month: number; netSalary: number; status: string }[]>(
         `/employees/${employeeId}/payroll-history`,
@@ -111,6 +121,10 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
         const days = calendarDaysNow;
         setWorkingDays(days);
         setConfig(normalizePayrollConfig(cfg.config));
+        setTaxRegime(cfg.taxRegime === 'OLD' ? 'OLD' : 'NEW');
+        setDeclaredDeductions(cfg.oldRegimeDeclaredDeductions ? String(cfg.oldRegimeDeclaredDeductions) : '');
+        setPtState(cfg.ptState || 'NONE');
+        if (cfg.preview) setServerPreview(cfg.preview);
         if (cfg.grossMonthly) {
           setDailySalary(String(calcDailySalary(cfg.grossMonthly, days)));
         }
@@ -120,10 +134,61 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
       .finally(() => setLoading(false));
   }, [employeeId, onError, calendarDaysNow]);
 
-  const preview = useMemo(
+  const localPreview = useMemo(
     () => calcPayrollPreview({ grossMonthly: parseMoneyInput(grossMonthly), config }),
     [grossMonthly, config],
   );
+
+  const body = useMemo(
+    () => ({
+      grossMonthly: parseMoneyInput(grossMonthly),
+      dailySalary: parseMoneyInput(dailySalary),
+      hourlySalary: hourlySalary ? Number(hourlySalary) : undefined,
+      salaryType,
+      effectiveFrom,
+      workingDays,
+      allowances: config.allowances,
+      deductions: config.deductions,
+      taxRegime,
+      oldRegimeDeclaredDeductions: taxRegime === 'OLD' ? parseMoneyInput(declaredDeductions) : undefined,
+      ptState,
+    }),
+    [
+      grossMonthly,
+      dailySalary,
+      hourlySalary,
+      salaryType,
+      effectiveFrom,
+      workingDays,
+      config,
+      taxRegime,
+      declaredDeductions,
+      ptState,
+    ],
+  );
+
+  // Statutory amounts (PF / ESI / TDS / PT) come from the API engine; debounce while editing.
+  useEffect(() => {
+    if (!isAdmin || loading) return;
+    const t = setTimeout(() => {
+      api<PayrollPreview>(`/employees/${employeeId}/payroll-config/preview`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+        .then(setServerPreview)
+        .catch(() => setServerPreview(null));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [body, employeeId, isAdmin, loading]);
+
+  const preview: PayrollPreview = serverPreview ?? localPreview;
+
+  function setDeduction<K extends keyof EmployeePayrollConfigJson['deductions']>(
+    key: K,
+    value: EmployeePayrollConfigJson['deductions'][K],
+  ) {
+    setConfig({ ...config, deductions: { ...config.deductions, [key]: value } });
+  }
 
   function updateAllowance(key: keyof EmployeePayrollConfigJson['allowances'], value: number) {
     if (typeof config.allowances[key] === 'number') {
@@ -137,16 +202,7 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
     try {
       await api(`/employees/${employeeId}/payroll-config`, {
         method: 'PUT',
-        body: JSON.stringify({
-          grossMonthly: parseMoneyInput(grossMonthly),
-          dailySalary: parseMoneyInput(dailySalary),
-          hourlySalary: hourlySalary ? Number(hourlySalary) : undefined,
-          salaryType,
-          effectiveFrom,
-          workingDays,
-          allowances: config.allowances,
-          deductions: config.deductions,
-        }),
+        body: JSON.stringify(body),
       });
       onMessage?.('Salary configuration saved.');
     } catch (e) {
@@ -307,67 +363,102 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
       <section>
         <h3 className="text-sm font-medium text-brand-700 mb-2">Deductions</h3>
         <div className="space-y-3 text-sm">
-          <div className="rounded border border-mist p-3">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                disabled={!isAdmin}
-                checked={config.deductions.pf.enabled}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    deductions: {
-                      ...config.deductions,
-                      pf: {
-                        ...config.deductions.pf,
-                        enabled: e.target.checked,
-                        mode: 'fixed',
-                        value: e.target.checked ? config.deductions.pf.value || 3600 : config.deductions.pf.value,
-                      },
-                    },
-                  })
-                }
-              />
-              Enable PF Deduction
-            </label>
-            {config.deductions.pf.enabled && (
-              <label className="mt-2 block">
-                <span className="text-ink/70">Monthly PF amount (₹)</span>
-                <input
-                  type="number"
-                  min={0}
+          <div className="rounded border border-brand-200 bg-brand-50/40 p-3">
+            <p className="font-medium text-brand-800">Income tax &amp; professional tax</p>
+            <div className="mt-2 grid sm:grid-cols-3 gap-2">
+              <label className="block">
+                <span className="text-ink/70">Tax regime</span>
+                <select
                   disabled={!isAdmin}
                   className="mt-1 w-full rounded border border-mist px-2 py-1"
-                  step="0.01"
-                  value={config.deductions.pf.value ?? ''}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      deductions: {
-                        ...config.deductions,
-                        pf: {
-                          ...config.deductions.pf,
-                          mode: 'fixed',
-                          value: parseMoneyInput(e.target.value),
-                        },
-                      },
-                    })
-                  }
-                />
+                  value={taxRegime}
+                  onChange={(e) => setTaxRegime(e.target.value === 'OLD' ? 'OLD' : 'NEW')}
+                >
+                  {TAX_REGIMES.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
               </label>
-            )}
+              {taxRegime === 'OLD' && (
+                <label className="block">
+                  <span className="text-ink/70">Declared annual deductions (80C etc.) ₹</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    disabled={!isAdmin}
+                    className="mt-1 w-full rounded border border-mist px-2 py-1"
+                    value={declaredDeductions}
+                    onChange={(e) => setDeclaredDeductions(e.target.value)}
+                  />
+                </label>
+              )}
+              <label className="block">
+                <span className="text-ink/70">Professional tax state</span>
+                <select
+                  disabled={!isAdmin}
+                  className="mt-1 w-full rounded border border-mist px-2 py-1"
+                  value={ptState}
+                  onChange={(e) => setPtState(e.target.value)}
+                >
+                  {PT_STATES.map((st) => (
+                    <option key={st.value} value={st.value}>
+                      {st.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="mt-2 text-xs text-ink/60">
+              Statutory amounts use the company&apos;s rule tables for the financial year (Payroll → Statutory
+              Rules). Verify the rules with your CA before go-live.
+            </p>
           </div>
 
-          <div className="rounded border border-brand-200 bg-brand-50/40 p-3">
-            <p className="font-medium text-brand-800">TDS (1%) — Mandatory for every employee</p>
-            <p className="text-xs text-ink/60 mt-1">
-              Automatically calculated as Applicable Monthly Gross × {TDS_PERCENT}%. Cannot be disabled.
-            </p>
-            <p className="mt-2 text-sm">
-              This month TDS preview:{' '}
-              <span className="font-semibold">{money(preview.tds)}</span>
-            </p>
-          </div>
+          <StatutoryToggle
+            label="PF (Provident Fund)"
+            help="Statutory: 12% of Basic (or gross when Basic is 0), on the ₹15,000 wage ceiling unless the company opts out."
+            isAdmin={isAdmin}
+            item={config.deductions.pf}
+            amount={preview.pf}
+            onChange={(pf) => setDeduction('pf', pf)}
+          />
+          <StatutoryToggle
+            label="ESI (Employee State Insurance)"
+            help="Statutory: 0.75% of gross when monthly gross is ₹21,000 or less (employer 3.25%)."
+            isAdmin={isAdmin}
+            item={config.deductions.esi}
+            amount={preview.esi ?? 0}
+            onChange={(esi) => setDeduction('esi', esi)}
+          />
+          <StatutoryToggle
+            label="TDS (income tax)"
+            help="Statutory: projected annual tax (slabs, standard deduction, 87A rebate, surcharge, cess) less TDS already deducted this FY, spread over the remaining months."
+            isAdmin={isAdmin}
+            item={config.deductions.tds}
+            amount={preview.tds}
+            onChange={(tds) => setDeduction('tds', tds)}
+          />
+          <StatutoryToggle
+            label="Professional Tax"
+            help="Statutory: the state slab table for the PT state above."
+            isAdmin={isAdmin}
+            item={{
+              enabled: config.deductions.professionalTax.enabled,
+              mode: config.deductions.professionalTax.mode ?? 'statutory',
+              value: config.deductions.professionalTax.amount,
+            }}
+            amount={preview.professionalTax}
+            onChange={(v) =>
+              setDeduction('professionalTax', {
+                enabled: v.enabled,
+                mode: v.mode === 'fixed' ? 'fixed' : 'statutory',
+                amount: v.value ?? 0,
+              })
+            }
+          />
 
           <div className="rounded border border-mist p-3">
             <label className="flex items-center gap-2">
@@ -501,50 +592,6 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
             )}
           </div>
 
-          <div className="rounded border border-mist p-3">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                disabled={!isAdmin}
-                checked={config.deductions.professionalTax.enabled}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    deductions: {
-                      ...config.deductions,
-                      professionalTax: {
-                        ...config.deductions.professionalTax,
-                        enabled: e.target.checked,
-                      },
-                    },
-                  })
-                }
-              />
-              Professional Tax
-            </label>
-            {config.deductions.professionalTax.enabled && (
-              <input
-                type="number"
-                min={0}
-                disabled={!isAdmin}
-                className="mt-2 w-full rounded border border-mist px-2 py-1"
-                step="0.01"
-                value={config.deductions.professionalTax.amount ?? ''}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    deductions: {
-                      ...config.deductions,
-                      professionalTax: {
-                        ...config.deductions.professionalTax,
-                        amount: parseMoneyInput(e.target.value),
-                      },
-                    },
-                  })
-                }
-              />
-            )}
-          </div>
         </div>
         {isAdmin && (
           <button
@@ -608,7 +655,8 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
           <div className="flex justify-between"><span>Gross Salary</span><span>{money(preview.grossSalary)}</span></div>
           <div className="flex justify-between text-green-700"><span>+ Total Allowances</span><span>{money(preview.totalAllowances)}</span></div>
           <div className="flex justify-between text-red-700"><span>- PF</span><span>{money(preview.pf)}</span></div>
-          <div className="flex justify-between text-red-700"><span>- TDS (1%)</span><span>{money(preview.tds)}</span></div>
+          <div className="flex justify-between text-red-700"><span>- ESI</span><span>{money(preview.esi ?? 0)}</span></div>
+          <div className="flex justify-between text-red-700"><span>- TDS</span><span>{money(preview.tds)}</span></div>
           <div className="flex justify-between text-red-700"><span>- Security Deposit</span><span>{money(preview.esd)}</span></div>
           <div className="flex justify-between text-red-700"><span>- Professional Tax</span><span>{money(preview.professionalTax)}</span></div>
           <div className="flex justify-between text-red-700"><span>- Other Deductions</span><span>{money(preview.otherDeductions)}</span></div>
@@ -616,6 +664,32 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
           <div className="flex justify-between font-semibold text-brand-700">
             <span>Final Net Salary</span><span>{money(preview.netSalary)}</span>
           </div>
+          {serverPreview ? (
+            <div className="mt-3 text-xs text-ink/60 space-y-1">
+              <div>
+                Employer cost (not deducted): PF EPS {money(serverPreview.employerPfEps ?? 0)} · PF EPF{' '}
+                {money(serverPreview.employerPfEpf ?? 0)} · ESI {money(serverPreview.employerEsi ?? 0)}
+              </div>
+              {serverPreview.statutory?.tds && (
+                <div>
+                  TDS estimate ({serverPreview.statutory.taxRegime} regime, FY {serverPreview.statutory.financialYear}):
+                  annual gross {money(serverPreview.statutory.tds.projectedAnnualGross)}, taxable{' '}
+                  {money(serverPreview.statutory.tds.taxableIncome)}, annual tax{' '}
+                  {money(serverPreview.statutory.tds.annualTax)}. Payroll recalculates each month from actual pay and
+                  TDS already deducted.
+                </div>
+              )}
+              {serverPreview.statutory?.verifyWithCA && (
+                <div className="text-amber-700">Statutory rules are unverified defaults — verify with your CA.</div>
+              )}
+            </div>
+          ) : (
+            localPreview.statutoryPending && (
+              <p className="mt-3 text-xs text-ink/60">
+                Statutory amounts (PF / ESI / TDS / PT) are calculated by the server on save.
+              </p>
+            )
+          )}
         </div>
       </section>
 
@@ -665,6 +739,70 @@ export function EmployeeSalaryConfig({ employeeId, isAdmin, onMessage, onError }
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+function StatutoryToggle({
+  label,
+  help,
+  isAdmin,
+  item,
+  amount,
+  onChange,
+}: {
+  label: string;
+  help: string;
+  isAdmin: boolean;
+  item: { enabled: boolean; mode?: 'percent' | 'fixed' | 'statutory'; value?: number; amount?: number };
+  amount: number;
+  onChange: (next: { enabled: boolean; mode: 'percent' | 'fixed' | 'statutory'; value?: number }) => void;
+}) {
+  const mode = item.mode ?? 'statutory';
+  const value = item.value ?? item.amount ?? 0;
+  return (
+    <div className="rounded border border-mist p-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            disabled={!isAdmin}
+            checked={item.enabled}
+            onChange={(e) => onChange({ enabled: e.target.checked, mode, value })}
+          />
+          {label}
+        </label>
+        {item.enabled && (
+          <select
+            disabled={!isAdmin}
+            className="rounded border border-mist px-2 py-1"
+            value={mode}
+            onChange={(e) =>
+              onChange({ enabled: true, mode: e.target.value as 'percent' | 'fixed' | 'statutory', value })
+            }
+          >
+            <option value="statutory">Statutory (rule tables)</option>
+            <option value="fixed">Fixed monthly amount (override)</option>
+            {mode === 'percent' && <option value="percent">% of gross (legacy)</option>}
+          </select>
+        )}
+        {item.enabled && <span className="ml-auto text-sm">This month: {money(amount)}</span>}
+      </div>
+      {item.enabled && mode !== 'statutory' && (
+        <label className="mt-2 block">
+          <span className="text-ink/70">{mode === 'percent' ? 'Percent of gross (%)' : 'Monthly amount (₹)'}</span>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            disabled={!isAdmin}
+            className="mt-1 w-full rounded border border-mist px-2 py-1"
+            value={value || ''}
+            onChange={(e) => onChange({ enabled: true, mode, value: parseMoneyInput(e.target.value) })}
+          />
+        </label>
+      )}
+      {item.enabled && mode === 'statutory' && <p className="mt-1 text-xs text-ink/60">{help}</p>}
     </div>
   );
 }

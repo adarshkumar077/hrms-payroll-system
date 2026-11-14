@@ -16,7 +16,6 @@ import {
   calcPayrollPreview,
   calendarDaysInMonth,
   defaultPayrollConfigJson,
-  TDS_PERCENT,
 } from '@/lib/payroll-calculator';
 
 type EmployeeRow = {
@@ -617,19 +616,16 @@ export default function EmployeesPage() {
                               pf: {
                                 ...form.payrollConfig.deductions.pf,
                                 enabled: e.target.checked,
-                                mode: 'fixed',
-                                value: e.target.checked
-                                  ? form.payrollConfig.deductions.pf.value || 3600
-                                  : form.payrollConfig.deductions.pf.value,
+                                mode: form.payrollConfig.deductions.pf.mode ?? 'statutory',
                               },
                             },
                           },
                         })
                       }
                     />
-                    Enable PF Deduction
+                    Enable PF Deduction (statutory: 12% of Basic, wage ceiling ₹15,000)
                   </label>
-                  {form.payrollConfig.deductions.pf.enabled && (
+                  {form.payrollConfig.deductions.pf.enabled && form.payrollConfig.deductions.pf.mode === 'fixed' && (
                     <input
                       type="number"
                       min={0}
@@ -657,8 +653,11 @@ export default function EmployeesPage() {
                 </div>
 
                 <div className="rounded border border-brand-200 bg-brand-50/40 p-3">
-                  <p className="font-medium text-brand-800">TDS {TDS_PERCENT}% — mandatory</p>
-                  <p className="text-xs text-ink/60">Applied automatically to every employee. Preview: ₹{salaryPreview.tds.toLocaleString('en-IN')}</p>
+                  <p className="font-medium text-brand-800">TDS — income-tax slabs (new regime by default)</p>
+                  <p className="text-xs text-ink/60">
+                    Calculated each payroll from the projected annual income. Set the tax regime and PT state on the
+                    employee Salary tab after creation.
+                  </p>
                 </div>
 
                 <div className="rounded border border-mist p-3">
@@ -748,7 +747,9 @@ export default function EmployeesPage() {
                   <div className="flex justify-between"><span>Gross Salary</span><span>₹{salaryPreview.grossSalary.toLocaleString('en-IN')}</span></div>
                   <div className="flex justify-between text-red-700"><span>- PF</span><span>₹{salaryPreview.pf.toLocaleString('en-IN')}</span></div>
                   <div className="flex justify-between text-red-700"><span>- Security Deposit</span><span>₹{salaryPreview.esd.toLocaleString('en-IN')}</span></div>
-                  <div className="flex justify-between text-red-700"><span>- TDS (1%)</span><span>₹{salaryPreview.tds.toLocaleString('en-IN')}</span></div>
+                  {salaryPreview.statutoryPending && (
+                    <div className="text-xs text-ink/60">PF / ESI / TDS / PT are statutory and shown on the Salary tab after saving.</div>
+                  )}
                   <div className="flex justify-between font-semibold text-brand-700 mt-1"><span>Net Salary</span><span>₹{salaryPreview.netSalary.toLocaleString('en-IN')}</span></div>
                 </div>
               )}

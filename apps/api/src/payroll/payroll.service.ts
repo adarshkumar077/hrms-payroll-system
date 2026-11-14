@@ -37,11 +37,21 @@ import {
 import {
   buildEmiAmounts,
   calcEmi,
+  calcEsdForMonth,
   calcPayrollPreview,
   calcPayslipTotals,
   calcProratedAmount,
   EmployeePayrollConfigJson,
+  normalizePayrollConfig,
+  PayrollPreview,
 } from './payroll-calculator';
+import {
+  PriorPayrollLine,
+  priorMonthsInEsiPeriod,
+  priorMonthsInFy,
+  summarizePriorPayroll,
+} from './statutory';
+import { StatutoryRulesService } from './statutory/statutory-rules.service';
 import * as M from '../common/money';
 
 type PayItem = { code: string; name: string; amount: number };
@@ -53,7 +63,50 @@ export class PayrollService {
     private readonly audit: AuditService,
     @Inject(forwardRef(() => WorkflowService))
     private readonly workflow: WorkflowService,
+    private readonly statutoryRules: StatutoryRulesService,
   ) {}
+
+  /** Read-only statutory rule tables (payroll settings screen). */
+  statutoryRulesView(companyId: string, financialYear?: string) {
+    return this.statutoryRules.view(companyId, financialYear);
+  }
+
+  /** Approved / locked payroll earlier in the FY, grouped by employee (for TDS projection + ESI period). */
+  private async priorPayrollByEmployee(companyId: string, year: number, month: number) {
+    const months = priorMonthsInFy(year, month);
+    const byEmp = new Map<string, PriorPayrollLine[]>();
+    if (!months.length) return byEmp;
+    const lines = await this.prisma.payrollLine.findMany({
+      where: {
+        companyId,
+        payrollRun: {
+          status: { in: [PayrollRunStatus.APPROVED, PayrollRunStatus.LOCKED] },
+          OR: months.map((m) => ({ year: m.year, month: m.month })),
+        },
+      },
+      select: {
+        employeeId: true,
+        earningsJson: true,
+        deductionsJson: true,
+        grossEarnings: true,
+        statutoryJson: true,
+        payrollRun: { select: { year: true, month: true } },
+      },
+    });
+    for (const l of lines) {
+      const list = byEmp.get(l.employeeId) ?? [];
+      list.push({
+        year: l.payrollRun.year,
+        month: l.payrollRun.month,
+        earnings: Array.isArray(l.earningsJson) ? (l.earningsJson as PayItem[]) : [],
+        deductions: Array.isArray(l.deductionsJson) ? (l.deductionsJson as PayItem[]) : [],
+        grossEarnings: l.grossEarnings,
+        statutory: (l.statutoryJson as PriorPayrollLine['statutory']) ?? null,
+      });
+      byEmp.set(l.employeeId, list);
+    }
+    return byEmp;
+  }
 
   private isFinance(user: AuthUser) {
     const roles: string[] = [RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN];
@@ -296,6 +349,15 @@ export class PayrollService {
     const incentiveAmount = await this.setting(user.companyId, 'incentive.amount', 0);
     const maxLate = await this.setting(user.companyId, 'incentive.max_late_marks', 0);
 
+    // Statutory rule tables for the run's FY and what was already paid earlier in the FY.
+    const { rules: statutoryRules } = await this.statutoryRules.getRulesForMonth(
+      user.companyId,
+      dto.year,
+      dto.month,
+    );
+    const priorByEmp = await this.priorPayrollByEmployee(user.companyId, dto.year, dto.month);
+    const esiPeriodMonths = priorMonthsInEsiPeriod(dto.year, dto.month);
+
     const run = await this.prisma.$transaction(async (tx) => {
       const payroll =
         existing ??
@@ -349,23 +411,15 @@ export class PayrollService {
           where: { employeeId: emp.id },
         });
 
-        if (payrollCfg) {
-          const cfg = payrollCfg.configJson as EmployeePayrollConfigJson;
-          const preview = calcPayrollPreview({
-            grossMonthly: payrollCfg.grossMonthly,
-            config: cfg,
-          });
-          if (preview.pf > 0) {
-            deductions.push({ code: 'PF', name: 'Provident Fund', amount: preview.pf });
-          }
-          if (preview.tds > 0) {
-            deductions.push({ code: 'TDS', name: 'TDS', amount: preview.tds });
-          }
-          if (preview.esd > 0) {
-            deductions.push({ code: 'ESD', name: 'Security Deposit', amount: preview.esd });
-          }
-          if (preview.professionalTax > 0) {
-            deductions.push({ code: 'PT', name: 'Professional Tax', amount: preview.professionalTax });
+        const cfg = payrollCfg
+          ? normalizePayrollConfig(payrollCfg.configJson as EmployeePayrollConfigJson)
+          : null;
+        if (payrollCfg && cfg) {
+          // ESD comes from the employee config; PF / ESI / TDS / PT are computed below, once every
+          // taxable earning (incentive) and LOP for the month is known.
+          const esdThisMonth = calcEsdForMonth(cfg.deductions.esd).amount;
+          if (esdThisMonth > 0) {
+            deductions.push({ code: 'ESD', name: 'Security Deposit', amount: esdThisMonth });
           }
           for (const custom of cfg.deductions.custom ?? []) {
             if (M.money(custom.amount).greaterThan(0)) {
@@ -463,6 +517,54 @@ export class PayrollService {
           earnings.push(item('REIMB', 'Reimbursement', reimbTotal));
         }
 
+        // Statutory deductions (PF / ESI / TDS / PT) for config-based employees. Each follows the
+        // employee's toggle: off, manual fixed / percent override, or the statutory engine.
+        let statutory: PayrollPreview | null = null;
+        if (payrollCfg && cfg) {
+          const lopAmount = M.sumBy(
+            deductions.filter((d) => d.code === 'LOP'),
+            (d) => d.amount,
+          );
+          const taxableEarnings = M.sumBy(
+            earnings.filter((e) => e.code !== 'REIMB'),
+            (e) => e.amount,
+          );
+          // Same base as the salary preview: configured gross + allowances (+ incentive) − LOP.
+          const monthlyGross = M.nonNegative(
+            M.sub(M.add(M.round2(payrollCfg.grossMonthly), taxableEarnings), lopAmount),
+          );
+          const pfWage =
+            basic > 0 ? M.nonNegative(M.sub(basic, lopAmount)) : M.round2(payrollCfg.grossMonthly);
+          const prior = summarizePriorPayroll(priorByEmp.get(emp.id) ?? [], esiPeriodMonths);
+          statutory = calcPayrollPreview({
+            grossMonthly: payrollCfg.grossMonthly,
+            config: cfg,
+            statutory: {
+              rules: statutoryRules,
+              year: dto.year,
+              month: dto.month,
+              taxRegime: emp.taxRegime,
+              declaredDeductions: emp.oldRegimeDeclaredDeductions ?? 0,
+              ptState: emp.ptState,
+              gender: emp.gender,
+              monthlyGross,
+              pfWage,
+              priorTaxableGross: prior.priorTaxableGross,
+              priorTdsDeducted: prior.priorTdsDeducted,
+              priorProfessionalTax: prior.priorProfessionalTax,
+              esiPeriodEligible: prior.esiPeriodEligible,
+            },
+          });
+          const statutoryItems: PayItem[] = [];
+          if (statutory.pf > 0) statutoryItems.push(item('PF', 'Provident Fund', statutory.pf));
+          if (statutory.esi > 0) statutoryItems.push(item('ESI', 'ESI (Employee)', statutory.esi));
+          if (statutory.tds > 0) statutoryItems.push(item('TDS', 'TDS', statutory.tds));
+          if (statutory.professionalTax > 0) {
+            statutoryItems.push(item('PT', 'Professional Tax', statutory.professionalTax));
+          }
+          deductions.unshift(...statutoryItems);
+        }
+
         const { gross, totalDeductions: ded, net } = calcPayslipTotals(earnings, deductions);
 
         await tx.payrollLine.create({
@@ -477,6 +579,12 @@ export class PayrollService {
             netPay: M.toDb(net),
             attendanceDays: presentDays,
             lopDays,
+            employerPfEps: M.toDb(statutory?.employerPfEps ?? 0),
+            employerPfEpf: M.toDb(statutory?.employerPfEpf ?? 0),
+            employerEsi: M.toDb(statutory?.employerEsi ?? 0),
+            statutoryJson: statutory
+              ? (statutory.statutory as unknown as Prisma.InputJsonValue)
+              : Prisma.JsonNull,
           },
         });
       }

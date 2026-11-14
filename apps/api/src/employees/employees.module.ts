@@ -3,9 +3,10 @@ import { EmployeesService } from './employees.service';
 import { EmployeePayrollService } from './employee-payroll.service';
 import { EmployeesController } from './employees.controller';
 import { LifecycleModule } from '../lifecycle/lifecycle.module';
+import { StatutoryModule } from '../payroll/statutory/statutory.module';
 
 @Module({
-  imports: [forwardRef(() => LifecycleModule)],
+  imports: [forwardRef(() => LifecycleModule), StatutoryModule],
   controllers: [EmployeesController],
   providers: [EmployeesService, EmployeePayrollService],
   exports: [EmployeesService, EmployeePayrollService],
