@@ -437,6 +437,12 @@ export class PayrollService {
             incentive: { code: 'INCENTIVE', name: 'Incentive', key: 'incentive' },
             special: { code: 'SPECIAL', name: 'Special Allowance', key: 'special' },
           };
+          // Configured monthly gross is a salary line in its own right (allowances are added on
+          // top), exactly as calcPayrollPreview shows it to HR. Previously it was never paid, so
+          // gross-only employees got ~₹0 earnings.
+          if (M.money(payrollCfg.grossMonthly).greaterThan(0)) {
+            earnings.push(item('SALARY', 'Salary', M.round2(payrollCfg.grossMonthly)));
+          }
           for (const meta of Object.values(allowanceCodes)) {
             const amt = cfg.allowances[meta.key];
             if (typeof amt === 'number' && amt > 0) {
@@ -458,10 +464,12 @@ export class PayrollService {
           earnings.push(item('BASIC', 'Basic', 0));
         }
 
-        // LOP deduction proportional to basic: basic × lopDays ÷ calendar days, rounded once.
+        // LOP deduction: lopBase × lopDays ÷ calendar days, rounded once. lopBase is Basic when
+        // set, otherwise the configured gross salary line (same fallback as the PF wage).
         const basic = earnings.find((e) => e.code === 'BASIC')?.amount ?? 0;
-        if (lopDays > 0 && basic > 0) {
-          const lopAmt = calcProratedAmount(basic, lopDays, workingDaysApprox);
+        const lopBase = basic > 0 ? basic : (earnings.find((e) => e.code === 'SALARY')?.amount ?? 0);
+        if (lopDays > 0 && lopBase > 0) {
+          const lopAmt = calcProratedAmount(lopBase, lopDays, workingDaysApprox);
           deductions.push(item('LOP', 'Loss of Pay', lopAmt));
         }
 
@@ -531,10 +539,13 @@ export class PayrollService {
           );
           // Same base as the salary preview: configured gross + allowances (+ incentive) − LOP.
           const monthlyGross = M.nonNegative(
-            M.sub(M.add(M.round2(payrollCfg.grossMonthly), taxableEarnings), lopAmount),
+            // taxableEarnings already contains the SALARY (configured gross) line.
+            M.sub(taxableEarnings, lopAmount),
           );
           const pfWage =
-            basic > 0 ? M.nonNegative(M.sub(basic, lopAmount)) : M.round2(payrollCfg.grossMonthly);
+            basic > 0
+              ? M.nonNegative(M.sub(basic, lopAmount))
+              : M.nonNegative(M.sub(M.round2(payrollCfg.grossMonthly), lopAmount));
           const prior = summarizePriorPayroll(priorByEmp.get(emp.id) ?? [], esiPeriodMonths);
           statutory = calcPayrollPreview({
             grossMonthly: payrollCfg.grossMonthly,

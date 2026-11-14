@@ -206,11 +206,12 @@ PT state comes from `employees.pt_state`. Leaving it empty or `NONE` means no PT
 - PF: EDLI (0.5%) and admin charges (0.5%) are not computed. The EPS rules for members who joined after 1 Sep 2014 earning above ₹15,000 (not eligible for EPS) are not modelled. Voluntary PF is not supported.
 - ESI: the rule that exempts the employee share for daily wages ≤ ₹176 is not modelled. The engine does not check whether the establishment is covered (10+ employees): HR enables ESI per employee.
 - PT: only the 7 states above are seeded. Other states need a row added to `professionalTax` in the rule set. Annual-cap reconciliation (for example, a joiner after February in MH) is not done.
-- **Existing issue found during T9, not fixed here:** for config-based employees, `PayrollService.generate`
-  builds payslip earnings only from the *allowances* in the config. The configured `grossMonthly` is not
-  added as an earning, but the preview and the statutory base treat salary as gross + allowances. A
-  gross-only employee therefore gets payslip earnings of ~₹0, and the statutory deductions are then capped
-  so net = 0. This was also true with the old 1% TDS. Fix the earnings composition before go-live.
+- **Fixed after T9 (earnings composition):** for config-based employees, `PayrollService.generate` now adds the
+  configured `grossMonthly` as a `SALARY` earning line, with allowances on top, the same way the salary
+  preview shows it. Leave-without-pay is prorated on Basic when Basic is set, otherwise on the `SALARY` line.
+  The statutory base is the sum of taxable earning lines minus LOP. **Confirm with HR** that "gross" in salary
+  config means base salary *excluding* the allowances entered next to it. If HR has been entering a gross that
+  already includes them, those employees will now be overpaid, and the config should be re-entered.
 - Salary-structure-only employees (no payroll config): statutory deductions come from their structure lines, as before.
 - The attendance payroll export uses the steady-state preview with the company's default rules (new regime, no PT state) and adds ESI into "Other deductions". The payroll run is the source of truth.
 - Editing rule sets: there is no UI yet. Update `statutory_rule_sets.rules` directly (it is validated on read).
