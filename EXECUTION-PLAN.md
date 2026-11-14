@@ -249,13 +249,13 @@ Tasks in the same wave touch different files, so they run in parallel. Each one 
 | T3 API hardening | Sonnet | 1 | ✅ merged (+ proxy-trust fix) | |
 | T4 Remove CRM | Sonnet | 1 | ✅ merged | |
 | T5 Docs and junk | Haiku | 1 | ✅ merged (+ LAN-IP cleanup) | |
-| T6 Dependency upgrades | Sonnet | 2 | 🔄 running | |
+| T6 Dependency upgrades | Sonnet | 2 | ✅ merged (audit: 0 prod vulns) | |
 | T7 Money as Decimal | Opus | 2 | 🔄 running | |
-| T8 ESLint and CI | Sonnet | 2 (after T6) | ⏳ | |
+| T8 ESLint and CI | Sonnet | 2 (after T6) | 🔄 running | |
 | T9 Statutory engine | Opus | 3 | ⏳ | |
 | T10 Statutory exports | Sonnet | 3 (after T9) | ⏳ | |
 | T11 Object storage | Sonnet | 3 | ⏳ | |
-| T12 Cookie sessions and CSP | Opus | 3 | ⏳ | |
-| T13 Off-site backups | Haiku | 3 | ⏳ | |
+| T12 Cookie sessions and CSP | Opus | 3 | 🔄 running | |
+| T13 Off-site backups | Haiku | 3 | 🔄 running | |
 | T14 Core tests | Sonnet | 3 | ⏳ | |
 | T15–T19 Launch | Owner | 4 | ⏳ | |
