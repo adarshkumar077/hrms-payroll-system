@@ -163,7 +163,10 @@ services:
     networks: [eitf]
 
   db-backup:
-    image: postgres:16-alpine
+    build:
+      context: ./deploy/backup
+      dockerfile: Dockerfile
+    image: eitf-hrms-db-backup:latest
     container_name: eitf-hrms-db-backup
     restart: unless-stopped
     depends_on:
@@ -175,10 +178,12 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB:-eitf_hrms}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-20}
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      BACKUP_RCLONE_REMOTE: ${BACKUP_RCLONE_REMOTE:-}
     volumes:
       - eitf_db_backups:/backups
-      - ./scripts/backup-db.sh:/usr/local/bin/backup-db.sh:ro
-    entrypoint: ["/bin/sh", "-c", "chmod +x /usr/local/bin/backup-db.sh 2>/dev/null; while true; do /usr/local/bin/backup-db.sh; sleep ${BACKUP_INTERVAL_SEC:-86400}; done"]
+      - ${BACKUP_RCLONE_CONFIG_DIR:-./deploy/backup/rclone}:/config/rclone:ro
     logging: *default-logging
     networks: [eitf]
 
