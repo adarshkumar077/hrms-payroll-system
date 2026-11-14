@@ -2,15 +2,9 @@ import { PrismaClient, RoleCode, Prisma, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { DEFAULT_COMPANY_SETTINGS, DEFAULT_POLICIES } from '../src/company/default-settings';
 
-const prisma = new PrismaClient();
+import { resolveBootstrapAdmin } from './bootstrap-admin';
 
-/** Production bootstrap only — never recreate demo Admin/HR/Employee accounts. */
-const BOOTSTRAP_SUPER_ADMIN = {
-  loginId: 'admin@eitf.in',
-  email: 'admin@eitf.in',
-  password: 'Admin@123',
-  displayName: 'Super Admin',
-} as const;
+const prisma = new PrismaClient();
 
 async function ensureRoles(companyId: string) {
   const roleDefs: { code: RoleCode; name: string; description: string }[] = [
@@ -98,22 +92,30 @@ async function main() {
     return;
   }
 
-  const passwordHash = await bcrypt.hash(BOOTSTRAP_SUPER_ADMIN.password, 12);
+  const result = resolveBootstrapAdmin(process.env);
+  if (result.kind === 'skip') {
+    console.warn(`Seed: ${result.reason}`);
+    console.log('Roles/settings ensured; no bootstrap user created.');
+    return;
+  }
+
+  const admin = result.admin;
+  const passwordHash = await bcrypt.hash(admin.password, 12);
   await prisma.user.create({
     data: {
       companyId: company.id,
-      loginId: BOOTSTRAP_SUPER_ADMIN.loginId,
-      email: BOOTSTRAP_SUPER_ADMIN.email,
+      loginId: admin.loginId,
+      email: admin.email,
       passwordHash,
-      displayName: BOOTSTRAP_SUPER_ADMIN.displayName,
+      displayName: admin.displayName,
       status: UserStatus.ACTIVE,
-      forcePasswordChange: false,
+      forcePasswordChange: true,
       userRoles: { create: [{ roleId: roleMap.get(RoleCode.SUPER_ADMIN)! }] },
     },
   });
 
   console.log(
-    `Created SUPER_ADMIN only: ${BOOTSTRAP_SUPER_ADMIN.loginId} / ${BOOTSTRAP_SUPER_ADMIN.password}`,
+    `Created bootstrap SUPER_ADMIN: ${admin.loginId} (password change required at first login).`,
   );
   console.log('Seed complete — no demo Admin/HR/Employee accounts.');
 }

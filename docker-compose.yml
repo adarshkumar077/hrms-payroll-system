@@ -71,6 +71,9 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS to your HTTPS origin in .env.production}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
       LOCAL_STORAGE_DIR: /app/apps/api/uploads
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_LOGIN_ID: ${BOOTSTRAP_ADMIN_LOGIN_ID:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
     volumes:
       - eitf_uploads:/app/apps/api/uploads
       - eitf_backups:/app/apps/api/data
