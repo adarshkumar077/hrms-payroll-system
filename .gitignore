@@ -34,3 +34,6 @@ apps/web/certificates/
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Off-site backup rclone config (contains cloud credentials; see docs/BACKUP_AND_RECOVERY.md)
+deploy/backup/rclone/
