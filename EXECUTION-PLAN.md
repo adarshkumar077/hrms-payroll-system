@@ -248,7 +248,7 @@ Tasks in the same wave touch different files, so they run in parallel. Each one 
 | T2 Bootstrap admin | Sonnet | 1 | ✅ merged | |
 | T3 API hardening | Sonnet | 1 | ✅ merged (+ proxy-trust fix) | |
 | T4 Remove CRM | Sonnet | 1 | ✅ merged | |
-| T5 Docs and junk | Haiku | 1 | 🔄 running | |
+| T5 Docs and junk | Haiku | 1 | ✅ merged (+ LAN-IP cleanup) | |
 | T6 Dependency upgrades | Sonnet | 2 | 🔄 running | |
 | T7 Money as Decimal | Opus | 2 | 🔄 running | |
 | T8 ESLint and CI | Sonnet | 2 (after T6) | ⏳ | |
