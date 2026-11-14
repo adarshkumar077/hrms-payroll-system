@@ -185,7 +185,7 @@ git pull
 docker compose --env-file .env.production --profile tunnel up -d --build
 
 # Backup manually
-docker exec eitf-hrms-db-backup /usr/local/bin/backup-db.sh
+docker exec eitf-hrms-db-backup /usr/local/bin/backup.sh once
 
 # Logs
 docker compose logs -f api nginx cloudflared

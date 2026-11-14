@@ -195,7 +195,7 @@ Survives: `docker compose restart`, server reboot, container rebuild.
 
 ### Manual backup
 ```bash
-docker exec eitf-hrms-db-backup /usr/local/bin/backup-db.sh
+docker exec eitf-hrms-db-backup /usr/local/bin/backup.sh once
 docker run --rm -v eitf_hrms_eitf_db_backups:/backups alpine ls -lh /backups
 ```
 
@@ -321,8 +321,8 @@ eitf-hrms/
 │   ├── certbot/                # Let's Encrypt init
 │   ├── systemd/                # Auto-start on reboot
 │   ├── up.sh / up.ps1          # Deploy scripts
+│   ├── backup/                 # Encrypted pg_dump + off-site upload + restore
 ├── scripts/
-│   ├── backup-db.sh            # Daily pg_dump
 │   ├── load-test.mjs           # Concurrent user test
 │   ├── soak-test.mjs           # Long-running stability
 │   ├── monitor-health.mjs      # Cron health probe
