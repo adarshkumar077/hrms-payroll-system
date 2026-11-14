@@ -73,6 +73,16 @@ services:
       INTEGRATION_SECRET_KEY: ${INTEGRATION_SECRET_KEY:?Set INTEGRATION_SECRET_KEY in .env.production (to keep existing encrypted integration secrets readable, use your current JWT_ACCESS_SECRET value)}
       TRUST_PROXY: ${TRUST_PROXY:-}
       LOCAL_STORAGE_DIR: /app/apps/api/uploads
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_SIGNING_SECRET: ${STORAGE_SIGNING_SECRET:-}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_LOGIN_ID: ${BOOTSTRAP_ADMIN_LOGIN_ID:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
@@ -102,6 +112,9 @@ services:
       PORT: 3000
       HOSTNAME: 0.0.0.0
       API_INTERNAL_URL: http://api:3001
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      # S3/R2 bucket origin for presigned selfie links (Content-Security-Policy img-src)
+      STORAGE_PUBLIC_ORIGIN: ${STORAGE_PUBLIC_ORIGIN:-}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

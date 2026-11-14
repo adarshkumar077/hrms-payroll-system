@@ -11,8 +11,25 @@ import type { NextRequest } from 'next/server';
  * External hosts actually used by the app (keep this list exact):
  * - connect-src https://nominatim.openstreetmap.org — reverse geocoding on /attendance/mark
  * - frame-src https://maps.google.com https://www.google.com — map embed on /attendance
+ * - img-src STORAGE_PUBLIC_ORIGIN — S3/R2 bucket origin(s) serving presigned selfie URLs when
+ *   the API runs with STORAGE_DRIVER=s3 (unset for the local driver: links are same-origin)
  * Static security headers (Referrer-Policy, Permissions-Policy, …) are in next.config.js.
  */
+/** Comma/space separated origins; anything that is not a plain http(s) origin is dropped. */
+function storageOrigins(): string[] {
+  return (process.env.STORAGE_PUBLIC_ORIGIN ?? '')
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .flatMap((raw) => {
+      try {
+        const u = new URL(raw);
+        return u.protocol === 'https:' || u.protocol === 'http:' ? [u.origin] : [];
+      } catch {
+        return [];
+      }
+    });
+}
+
 function buildCsp(nonce: string, isDev: boolean): string {
   const directives: Record<string, string[]> = {
     'default-src': ["'self'"],
@@ -20,7 +37,7 @@ function buildCsp(nonce: string, isDev: boolean): string {
     'script-src': ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'", ...(isDev ? ["'unsafe-eval'"] : [])],
     // React `style={}` attributes and Next's injected <style> need inline styles (not scripts).
     'style-src': ["'self'", "'unsafe-inline'"],
-    'img-src': ["'self'", 'data:', 'blob:'],
+    'img-src': ["'self'", 'data:', 'blob:', ...storageOrigins()],
     'font-src': ["'self'", 'data:'],
     'connect-src': ["'self'", 'https://nominatim.openstreetmap.org', ...(isDev ? ['ws:', 'wss:'] : [])],
     'media-src': ["'self'", 'blob:'],
