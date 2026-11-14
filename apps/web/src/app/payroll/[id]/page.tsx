@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { api, getStoredUser } from '@/lib/api';
+import { api, authFetch, getApiBaseUrl, getStoredUser } from '@/lib/api';
 
 type LineItem = { code: string; name: string; amount: number };
 type Line = {
@@ -33,6 +33,32 @@ type Run = {
   lines: Line[];
 };
 
+type Issue = { employeeCode: string; name: string };
+type Validation = {
+  missingUan: Issue[];
+  missingEsicNumber: Issue[];
+  missingPan: Issue[];
+  missingBank: Issue[];
+};
+
+const EXPORTS = [
+  { key: 'pf-ecr', label: 'PF ECR (.txt)' },
+  { key: 'esi', label: 'ESI sheet (.xlsx)' },
+  { key: 'bank', label: 'Bank transfer (.csv)' },
+] as const;
+
+const WARNINGS: { key: keyof Validation; label: string }[] = [
+  { key: 'missingUan', label: 'Missing UAN (left out of the PF ECR file)' },
+  { key: 'missingEsicNumber', label: 'Missing ESIC number' },
+  { key: 'missingPan', label: 'Missing PAN (TDS deducted)' },
+  { key: 'missingBank', label: 'Missing bank details (left out of the bank file)' },
+];
+
+function fyOf(year: number, month: number) {
+  const start = month >= 4 ? year : year - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
+}
+
 export default function PayrollRunPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -42,6 +68,9 @@ export default function PayrollRunPage() {
   const [canApprove, setCanApprove] = useState(false);
   const [canMarkPaid, setCanMarkPaid] = useState(false);
   const [markingPaid, setMarkingPaid] = useState<string | null>(null);
+  const [canExport, setCanExport] = useState(false);
+  const [validation, setValidation] = useState<Validation | null>(null);
+  const [downloading, setDownloading] = useState<string | null>(null);
 
   function load() {
     api<Run>(`/payroll/runs/${id}`)
@@ -57,8 +86,46 @@ export default function PayrollRunPage() {
     }
     setCanApprove(u.roles.some((r) => ['SUPER_ADMIN', 'ADMIN'].includes(r)));
     setCanMarkPaid(u.roles.some((r) => ['SUPER_ADMIN', 'ADMIN', 'HR'].includes(r)));
+    const exporter = u.roles.some((r) => ['SUPER_ADMIN', 'HR'].includes(r));
+    setCanExport(exporter);
+    if (exporter) {
+      api<Validation>(`/payroll/runs/${id}/exports/validation`)
+        .then(setValidation)
+        .catch(() => setValidation(null));
+    }
     load();
   }, [router, id]);
+
+  async function download(path: string, key: string, fallbackName: string) {
+    setDownloading(key);
+    setError('');
+    try {
+      const res = await authFetch(`${getApiBaseUrl()}${path}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { message?: string }).message || `Download failed (${res.status})`);
+      }
+      const cd = res.headers.get('Content-Disposition') ?? '';
+      const name = /filename="?([^";]+)"?/.exec(cd)?.[1] ?? fallbackName;
+      const missing = res.headers.get('X-Missing-UAN');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMessage(
+        missing && Number(missing) > 0
+          ? `Downloaded ${name}. ${missing} member(s) without a UAN were left out.`
+          : `Downloaded ${name}`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Download failed');
+    } finally {
+      setDownloading(null);
+    }
+  }
 
   async function handleMarkPaid(lineId: string) {
     if (!window.confirm('Mark this line as paid?')) return;
@@ -132,6 +199,55 @@ export default function PayrollRunPage() {
           </>
         )}
       </div>
+
+      {run && canExport && ['APPROVED', 'LOCKED'].includes(run.status) && (
+        <section className="mb-6 bg-white/80 border border-brand-100 rounded-lg p-4 text-sm">
+          <h2 className="font-medium text-ink/90 mb-2">Exports</h2>
+          <div className="flex flex-wrap gap-2">
+            {EXPORTS.map((x) => (
+              <button
+                key={x.key}
+                type="button"
+                disabled={downloading !== null}
+                onClick={() =>
+                  download(`/payroll/runs/${id}/exports/${x.key}`, x.key, `${x.key}-${run.year}-${run.month}`)
+                }
+                className="bg-brand-600 text-white px-3 py-2 rounded text-xs disabled:opacity-50"
+              >
+                {downloading === x.key ? 'Preparing…' : x.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              disabled={downloading !== null}
+              onClick={() =>
+                download(
+                  `/payroll/exports/tds?fy=${fyOf(run.year, run.month)}`,
+                  'tds',
+                  'tds-form16-data.xlsx',
+                )
+              }
+              className="bg-brand-600 text-white px-3 py-2 rounded text-xs disabled:opacity-50"
+            >
+              {downloading === 'tds' ? 'Preparing…' : `TDS / Form 16 data FY ${fyOf(run.year, run.month)} (.xlsx)`}
+            </button>
+          </div>
+          <p className="text-xs text-ink/50 mt-2">
+            The TDS export is data for Form 16 / 24Q preparation, not the official form. Verify all
+            statutory files with your CA before filing.
+          </p>
+          {validation && WARNINGS.some((w) => validation[w.key].length > 0) && (
+            <div className="mt-3 border border-amber-300 bg-amber-50 rounded p-3 text-xs text-amber-900 space-y-1">
+              <p className="font-medium">Fix these before filing</p>
+              {WARNINGS.filter((w) => validation[w.key].length > 0).map((w) => (
+                <p key={w.key}>
+                  {w.label}: {validation[w.key].map((i) => `${i.employeeCode} ${i.name}`).join(', ')}
+                </p>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <ul className="space-y-3">
         {run?.lines.map((line) => (
