@@ -21,7 +21,7 @@ async function bootstrap() {
     }),
   );
 
-  app.use(json({ limit: '12mb' }));
+  app.use(json({ limit: '4mb' }));
   app.use(urlencoded({ extended: true, limit: '12mb' }));
 
   const prefix = config.get<string>('API_PREFIX', 'api/v1');

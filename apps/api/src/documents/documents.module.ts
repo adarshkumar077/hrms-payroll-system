@@ -4,9 +4,10 @@ import { DocumentsController } from './documents.controller';
 import { LibraryDocumentsService } from './library-documents.service';
 import { LibraryDocumentsController } from './library-documents.controller';
 import { StorageService } from './storage.service';
+import { StorageController } from './storage.controller';
 
 @Module({
-  controllers: [DocumentsController, LibraryDocumentsController],
+  controllers: [DocumentsController, LibraryDocumentsController, StorageController],
   providers: [DocumentsService, LibraryDocumentsService, StorageService],
   exports: [DocumentsService, LibraryDocumentsService, StorageService],
 })

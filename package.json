@@ -38,7 +38,8 @@
     "monitor": "node scripts/monitor-health.mjs",
     "security-test": "node scripts/security-pentest.mjs",
     "lint": "npm run lint -w @eitf/api && npm run lint -w @eitf/web",
-    "test": "npm test -w @eitf/api"
+    "test": "npm test -w @eitf/api",
+    "db:migrate-selfies": "npm run db:migrate-selfies -w @eitf/api --"
   },
   "engines": {
     "node": ">=20"
