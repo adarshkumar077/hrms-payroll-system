@@ -43,9 +43,7 @@ export class SecurityController {
     @Body() body: { settings: Record<string, unknown> },
     @Req() req: { ip?: string; headers?: Record<string, string | string[] | undefined> },
   ) {
-    const fwd = req.headers?.['x-forwarded-for'];
-    const ip =
-      (typeof fwd === 'string' ? fwd.split(',')[0]?.trim() : undefined) || req.ip;
+    const ip = req.ip;
     return this.security.updateSecuritySettings(user.companyId, user.id, body.settings ?? {}, {
       ip,
     });

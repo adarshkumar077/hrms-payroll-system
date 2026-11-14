@@ -7,6 +7,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { timingSafeEqual } from 'crypto';
 import {
   AttendanceDayStatus,
   AttendanceMethod,
@@ -1789,7 +1790,9 @@ export class AttendanceService implements OnModuleInit {
       'integrations.biometric_webhook_secret',
       '',
     );
-    if (!expectedSecret || dto.secret !== expectedSecret) {
+    const a = Buffer.from(String(dto.secret ?? ''));
+    const b = Buffer.from(String(expectedSecret));
+    if (!expectedSecret || a.length !== b.length || !timingSafeEqual(a, b)) {
       throw new ForbiddenException('Invalid biometric webhook secret');
     }
 

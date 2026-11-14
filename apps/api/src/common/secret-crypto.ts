@@ -2,7 +2,14 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypt
 import { ConfigService } from '@nestjs/config';
 
 function keyFromConfig(config: ConfigService) {
-  const secret = config.get<string>('INTEGRATION_SECRET_KEY') ?? config.get<string>('JWT_ACCESS_SECRET') ?? 'eitf-dev-secret-key';
+  // NOTE: in production INTEGRATION_SECRET_KEY is mandatory. Values previously encrypted
+  // with the JWT_ACCESS_SECRET fallback will NOT decrypt with a new key; set
+  // INTEGRATION_SECRET_KEY equal to the old JWT_ACCESS_SECRET (or re-encrypt) when migrating.
+  const explicit = config.get<string>('INTEGRATION_SECRET_KEY');
+  if (!explicit && (config.get<string>('NODE_ENV') ?? process.env.NODE_ENV) === 'production') {
+    throw new Error('INTEGRATION_SECRET_KEY must be set in production');
+  }
+  const secret = explicit ?? config.get<string>('JWT_ACCESS_SECRET') ?? 'eitf-dev-secret-key';
   return createHash('sha256').update(secret).digest();
 }
 

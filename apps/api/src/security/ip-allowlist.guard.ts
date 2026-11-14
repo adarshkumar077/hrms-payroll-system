@@ -16,11 +16,8 @@ export class IpAllowlistGuard implements CanActivate {
       context.getClass(),
     ]);
     const req = context.switchToHttp().getRequest();
-    const fwd = req.headers?.['x-forwarded-for'];
-    const ip =
-      (typeof fwd === 'string' ? fwd.split(',')[0]?.trim() : undefined) ||
-      req.ip ||
-      req.socket?.remoteAddress;
+    // req.ip honours Express 'trust proxy' (TRUST_PROXY); never read X-Forwarded-For directly.
+    const ip: string | undefined = req.ip || req.socket?.remoteAddress;
 
     // Authenticated: use user company
     if (req.user?.companyId) {
