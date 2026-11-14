@@ -14,7 +14,7 @@ cp .env.production.example .env.production
 
 | Env | Purpose |
 |---|---|
-| Local | Embedded Postgres (`npm run db:up` on **5433**) or Docker Compose |
+| Local | Embedded Postgres (`npm run db:up` on **5435**) or Docker Compose |
 | Staging / Prod | Managed Postgres + API + Web + Mobile store builds |
 
 ## Prerequisites
@@ -26,11 +26,11 @@ cp .env.production.example .env.production
 
 ## Local (no Docker)
 
-```powershell
-cd C:\Users\Aadarsh\Projects\eitf-hrms
+```bash
+# from the repo root
 npm install
 npm run db:up
-copy .env.example apps\api\.env   # adjust DATABASE_URL if needed
+cp .env.example apps/api/.env   # adjust DATABASE_URL if needed
 npm run db:migrate
 npm run db:seed
 npm run dev:api
@@ -47,6 +47,7 @@ npm run dev:web
    - `DATABASE_URL`
    - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`
    - `CORS_ORIGINS` (comma-separated web origins)
+   - `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` for the first Super Admin (or use `/auth/setup/super-admin` on first run)
    - Optional: `OPENAI_API_KEY`, SMS/email provider keys
 2. Build & run:
 
@@ -83,7 +84,7 @@ Set `EXPO_PUBLIC_API_URL` for the target environment.
 ## Migrations
 
 ```bash
-# stop Nest watch on Windows before prisma generate if you hit EPERM
+# on Windows, stop the Nest watcher before prisma generate if you hit EPERM
 npm run prisma:migrate -w @eitf/api   # dev
 npm run prisma:deploy -w @eitf/api    # prod
 ```

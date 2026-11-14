@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --experimental-https --experimental-https-key ./certificates/localhost-key.pem --experimental-https-cert ./certificates/localhost.pem -H 0.0.0.0 -p 3000",
+    "dev": "npm run dev:https",
     "dev:http": "next dev -H 0.0.0.0 -p 3000",
-    "dev:https": "next dev --experimental-https --experimental-https-key ./certificates/localhost-key.pem --experimental-https-cert ./certificates/localhost.pem -H 0.0.0.0 -p 3000",
+    "dev:https": "node -e \"require('fs').existsSync('certificates/localhost.pem')||(console.error('Missing apps/web/certificates/localhost.pem. Create it with: mkdir -p certificates && cd certificates && mkcert localhost'),process.exit(1))\" && next dev --experimental-https --experimental-https-key ./certificates/localhost-key.pem --experimental-https-cert ./certificates/localhost.pem -H 0.0.0.0 -p 3000",
     "dev:internal": "next dev -H 127.0.0.1 -p 3005",
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3000",

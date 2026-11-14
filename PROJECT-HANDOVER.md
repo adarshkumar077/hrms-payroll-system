@@ -1,9 +1,9 @@
 # EITF HRMS & Payroll — Project Handover
 
 **Document type:** Product + engineering handover  
-**Repository:** `C:\Users\Aadarsh\Projects\eitf-hrms`  
+**Repository:** this monorepo (the folder that contains this file)  
 **Product focus:** HR Attendance, Leave, Payroll, and core HR operations  
-**Last updated:** 2026-09-07  
+**Last updated:** 2026-11-14  
 
 ---
 
@@ -16,9 +16,8 @@
 | Frontend | `apps/web` | Next.js 15 portal (admin + employee self-service) |
 | Backend | `apps/api` | NestJS 11 REST API + Prisma |
 | Database | Embedded Postgres (dev) | Port **5435**, database `eitf_hrms` |
-| Dormant | `apps/orbit`, `apps/api/src/crm` | Former CRM merge artifacts — **not started / not registered** |
 
-**Current product stance:** CRM was removed from the live product surface (sidebar, Nest `CrmModule`, Orbit proxy). The application focuses on **HR Attendance & Payroll**. CRM code/schema may still exist in the tree for historical reasons but is inactive.
+**Current product stance:** The application focuses on **HR Attendance, Leave and Payroll**.
 
 | Service | URL / Port |
 |---------|------------|
@@ -42,16 +41,12 @@ Defined in `apps/api/src/common/roles.constants.ts`:
 | `HR` | HR operations (attendance, leave, employees) |
 | `EMPLOYEE` | Self-service (ESS) |
 
-### Seed logins
+### Bootstrap Super Admin (single source of truth)
 
-From `apps/api/prisma/seed.ts` (after `npm run db:seed`):
+- **Production:** the first Super Admin is created from the env vars `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`. If either is unset, no user is created; use the first-run screen at `/auth/setup/super-admin` instead. The account is created with a forced password change.
+- **Local development:** `npm run db:seed` creates `admin@eitf.in` / `Admin@123` with a forced password change on first login. The seed never overwrites existing users.
 
-| Role | User ID (`loginId`) | Email | Password |
-|------|---------------------|-------|----------|
-| Super Admin | `superadmin` | superadmin@company.com | `Super@123` |
-| Admin | `admin` | admin@company.com | `Admin@123` |
-| HR | `hr001` | hr001@company.com | `HR@123` |
-| Employee | `emp001` | emp001@company.com | `Emp@123` |
+No other demo accounts exist. Create users from **Admin → Users**.
 
 Login accepts **User ID or email** (field `identifier` on the web form).
 
@@ -76,7 +71,7 @@ flowchart LR
 - Browser calls **same origin** `/api/v1/*`.
 - Next.js rewrites `/api/v1/:path*` → `http://127.0.0.1:3001/api/v1/:path*` (`apps/web/next.config.js`).
 - Nest global prefix: `api/v1` (`apps/api/src/main.ts`).
-- Dev entry: `npm run start:localhost` → API + web only (`scripts/start-localhost.mjs`). Orbit is **not** started.
+- Dev entry: `npm run start:localhost` → API + web (+ public tunnel) (`scripts/start-localhost.mjs`).
 
 ### 3.2 Authentication flow
 
@@ -130,7 +125,6 @@ flowchart TD
 | Root | npm workspaces; Node `>=20` |
 | `apps/api` | NestJS ^11, Prisma ^6, JWT/Passport, TypeScript ^5.7 |
 | `apps/web` | Next.js ^15.1, React ^19, Tailwind ^3.4 |
-| `apps/orbit` | Next 14.2.5 + Prisma 5 (dormant; not in localhost start) |
 
 ### 4.2 Top-level layout
 
@@ -139,7 +133,6 @@ eitf-hrms/
 ├── apps/
 │   ├── api/          # Nest API + Prisma schema/migrations/seed
 │   ├── web/          # Next.js HR portal
-│   ├── orbit/        # Former Orbit CRM app (not started by default)
 │   └── mobile/       # Expo app (exists; not in root workspaces)
 ├── scripts/          # start-localhost, embedded PG, smoke/load tests
 ├── docs/             # PHASE docs, deployment, security, training
@@ -163,8 +156,6 @@ From `apps/web/src/lib/navigation.ts`:
 | Administration | Workflows, Integrations, Training, Security, Audit, Login Activity, User Control |
 | Settings | Company, Billing |
 | Support | Help |
-
-**CRM paths denied** in `canAccessPath` (`/crm`, `/orbit`, `/sso/orbit`). Legacy CRM URLs redirect to `/dashboard` or HR equivalents (`next.config.js`).
 
 ---
 
@@ -338,7 +329,6 @@ Base URL: **`/api/v1`**. Controllers often use empty `@Controller()`; paths are 
 | Performance | Goals, assessments, trainings |
 | Ops | Tickets, notifications, announcements, approval workflows |
 | Integrations / AI | `IntegrationConfig`, `AiChatMessage`, `ResumeScreening` |
-| CRM (schema only) | `CrmCustomer`, `CrmLead`, `CrmDeal`, `CrmFollowUp`, `CrmNote`, `CrmTask`, … — **module not registered in AppModule** |
 
 Database migrations live under `apps/api/prisma/migrations/`. Seed: `apps/api/prisma/seed.ts`.
 
@@ -359,8 +349,6 @@ Database migrations live under `apps/api/prisma/migrations/`. Seed: `apps/api/pr
 | Admin | `/admin/users`, `/admin/login-activity`, `/security`, `/workflows` |
 | Settings | `/settings/company`, `/billing` |
 
-Pages under `app/crm/` and `app/sso/orbit/` may still exist as files; navigation and redirects keep them out of normal product use.
-
 ### 8.2 Client API (`apps/web/src/lib/api.ts`)
 
 - Base URL: same-origin `/api/v1` (rewritten to Nest).
@@ -369,7 +357,7 @@ Pages under `app/crm/` and `app/sso/orbit/` may still exist as files; navigation
 
 ### 8.3 Access control (UI)
 
-`canAccessPath` in `navigation.ts` gates client routes by role and denies CRM/Orbit paths.
+`canAccessPath` in `navigation.ts` gates client routes by role.
 
 ---
 
@@ -378,24 +366,24 @@ Pages under `app/crm/` and `app/sso/orbit/` may still exist as files; navigation
 ### 9.1 First-time / local start
 
 ```bash
-cd C:\Users\Aadarsh\Projects\eitf-hrms
+# from the repo root
 npm install
 npm run db:up                 # Embedded Postgres on :5435
 npm run db:generate           # Prisma client
 npm run db:migrate            # Apply migrations
-npm run db:seed               # Seed roles + demo users
+npm run db:seed               # Seed roles + bootstrap Super Admin (dev)
 npm run start:localhost       # API :3001 + Web :3000
 ```
 
-Open **http://localhost:3000** → login with seed accounts above.
+Open **http://localhost:3000** and sign in as described in section 2.
 
 ### 9.2 Useful scripts
 
 | Script | Purpose |
 |--------|---------|
 | `npm run db:up` | Start embedded Postgres |
-| `npm run db:seed` | Reseed demo accounts |
-| `npm run db:ensure-accounts` | Ensure seed accounts exist |
+| `npm run db:seed` | Seed roles and the bootstrap Super Admin (no-op for existing users) |
+| `npm run db:ensure-accounts` | Ensure the bootstrap Super Admin exists |
 | `npm run build:api` / `build:web` | Production builds |
 | `npm run smoke-test` | Smoke checks (if configured) |
 
@@ -411,9 +399,8 @@ Typical `apps/api/.env` (do not commit secrets):
 
 ### 9.4 Known operational pitfalls
 
-1. **Wrong stack on ports:** A copy under `...\eitf-hrms-BACKUP` previously occupied `:3000`/`:3001` with DB on `:5433`, causing “Invalid User ID/Email or Password” or “Server error…”. Always run **Projects** `eitf-hrms` against **5435**.
+1. **Wrong stack on ports:** A second copy of the repo running on `:3000`/`:3001` with the DB on a different port causes “Invalid User ID/Email or Password” or “Server error…”. Make sure only one copy runs and the API points at the DB on **5435**.
 2. **Redis:** Optional; health may show `redis: error` / degraded — login still works.
-3. **Orbit on :3010:** Not required for HRMS; do not start unless deliberately reviving CRM.
 
 ---
 
@@ -421,11 +408,7 @@ Typical `apps/api/.env` (do not commit secrets):
 
 | Item | Status |
 |------|--------|
-| CRM sidebar / Orbit proxy | Removed from product |
-| Nest `CrmModule` | Not imported in `AppModule` |
-| CRM Prisma models | Still in schema (inactive) |
-| `apps/orbit` | Present in workspaces; not started by `start:localhost` |
-| `apps/web/src/app/crm/*` | Pages may remain; redirects + ACL block usage |
+| CRM/Orbit code removed (2026-11) | Done |
 | Mobile (`apps/mobile`) | Present; not in root `workspaces` |
 | Historical docs | `docs/PHASE*.md`, merge reports (`UNIFIED-MERGE.md`, etc.) — reference only |
 
@@ -462,9 +445,9 @@ Typical `apps/api/.env` (do not commit secrets):
 After starting the stack:
 
 - [ ] http://localhost:3000 loads login
-- [ ] `superadmin` / `Super@123` signs in
-- [ ] Dashboard shows HR metrics (no CRM lead widgets)
-- [ ] Sidebar has Time & Attendance + Compensation; **no CRM group**
+- [ ] Super Admin signs in (local dev: `admin@eitf.in` / `Admin@123`)
+- [ ] Dashboard shows HR metrics
+- [ ] Sidebar has Time & Attendance + Compensation
 - [ ] `/attendance/mark` and `/attendance` work for appropriate roles
 - [ ] `/leave/apply` and `/leave/approvals` work
 - [ ] `/payroll` and `/payroll/payslips` work for appropriate roles

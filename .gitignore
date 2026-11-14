@@ -35,3 +35,7 @@ apps/orbit/.next/
 apps/orbit/prisma/*.db
 apps/orbit/prisma/*.db-journal
 apps/orbit/.env
+
+# Local tooling binaries and TLS certs (never commit; see docs/MANUAL-START.md)
+deploy/bin/
+apps/web/certificates/
