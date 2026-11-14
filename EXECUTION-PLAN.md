@@ -224,7 +224,8 @@ Tasks in the same wave touch different files, so they run in parallel. Each one 
   - employee-scope and IDOR checks (`authorization.util.ts`)
   - the leave approval chain
   - payroll generate → approve → payslip visibility
-- **Acceptance:** CI runs them, and they pass.
+- **Also (found in T7):** fix two pre-existing schema drifts: `import_jobs.error_report` vs `errorReport` column naming, and the missing unique index on `roles(company_id, code)`.
+- **Acceptance:** CI runs them, and they pass. `prisma migrate diff` shows no drift.
 
 ---
 
@@ -250,11 +251,11 @@ Tasks in the same wave touch different files, so they run in parallel. Each one 
 | T4 Remove CRM | Sonnet | 1 | ✅ merged | |
 | T5 Docs and junk | Haiku | 1 | ✅ merged (+ LAN-IP cleanup) | |
 | T6 Dependency upgrades | Sonnet | 2 | ✅ merged (audit: 0 prod vulns) | |
-| T7 Money as Decimal | Opus | 2 | 🔄 running | |
+| T7 Money as Decimal | Opus | 2 | ✅ merged (26 fields; 44 tests) | |
 | T8 ESLint and CI | Sonnet | 2 (after T6) | ✅ merged (0 errors, 48 warnings) | |
-| T9 Statutory engine | Opus | 3 | ⏳ | |
+| T9 Statutory engine | Opus | 3 | 🔄 running | |
 | T10 Statutory exports | Sonnet | 3 (after T9) | ⏳ | |
-| T11 Object storage | Sonnet | 3 | ⏳ | |
+| T11 Object storage | Sonnet | 3 | 🔄 running | |
 | T12 Cookie sessions and CSP | Opus | 3 | 🔄 running | |
 | T13 Off-site backups | Haiku | 3 | ✅ merged | |
 | T14 Core tests | Sonnet | 3 | ⏳ | |
