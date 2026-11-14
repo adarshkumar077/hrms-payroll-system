@@ -254,7 +254,7 @@ Tasks in the same wave touch different files, so they run in parallel. Each one 
 | T7 Money as Decimal | Opus | 2 | ✅ merged (26 fields; 44 tests) | |
 | T8 ESLint and CI | Sonnet | 2 (after T6) | ✅ merged (0 errors, 48 warnings) | |
 | T9 Statutory engine | Opus | 3 | ✅ merged (+ gross-salary payroll fix; rules need CA check) | |
-| T10 Statutory exports | Sonnet | 3 (after T9) | 🔄 running | |
+| T10 Statutory exports | Sonnet | 3 (after T9) | ✅ merged (ECR layout needs EPFO trial upload) | |
 | T11 Object storage | Sonnet | 3 | ✅ merged (+ CSP and compose wiring) | |
 | T12 Cookie sessions and CSP | Opus | 3 | ✅ merged (verified live) | |
 | T12b Mobile change-password screen (found in T12: forced-change users get 403 on mobile) | Haiku | 3 | ✅ merged (not type-checked: no mobile deps installed) | |
