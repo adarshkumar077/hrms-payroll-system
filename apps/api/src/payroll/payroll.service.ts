@@ -35,9 +35,16 @@ import {
   SubmitReimbursementDto,
 } from './dto/money.dto';
 import {
+  buildEmiAmounts,
+  calcEmi,
   calcPayrollPreview,
+  calcPayslipTotals,
+  calcProratedAmount,
   EmployeePayrollConfigJson,
 } from './payroll-calculator';
+import * as M from '../common/money';
+
+type PayItem = { code: string; name: string; amount: number };
 
 @Injectable()
 export class PayrollService {
@@ -140,7 +147,7 @@ export class PayrollService {
         lines: {
           create: dto.lines.map((l) => ({
             componentId: l.componentId,
-            amount: l.amount,
+            amount: M.toDb(l.amount),
             percentOfBasic: l.percentOfBasic,
           })),
         },
@@ -173,12 +180,12 @@ export class PayrollService {
           companyId: user.companyId,
           employeeId: dto.employeeId,
           effectiveFrom: new Date(dto.effectiveFrom),
-          ctcAnnual: dto.ctcAnnual,
+          ctcAnnual: M.toDb(dto.ctcAnnual),
           notes: dto.notes,
           lines: {
             create: dto.lines.map((l) => ({
               componentId: l.componentId,
-              amount: l.amount,
+              amount: M.toDb(l.amount),
             })),
           },
         },
@@ -190,12 +197,12 @@ export class PayrollService {
           employeeId: dto.employeeId,
           effectiveFrom: new Date(dto.effectiveFrom),
           previousCtc: prev?.ctcAnnual,
-          newCtc: dto.ctcAnnual,
+          newCtc: M.toDb(dto.ctcAnnual),
           reason: dto.reason ?? 'Structure assigned',
           createdBy: user.id,
           snapshot: created.lines.map((l) => ({
             code: l.component.code,
-            amount: l.amount,
+            amount: M.toNumber(l.amount),
           })) as Prisma.InputJsonValue,
         },
       });
@@ -328,8 +335,15 @@ export class PayrollService {
           where: { employeeId: emp.id },
         });
 
-        const earnings: { code: string; name: string; amount: number }[] = [];
-        const deductions: { code: string; name: string; amount: number }[] = [];
+        // Every line item amount is rounded HALF_UP to 2dp when it is added; totals are
+        // exact Decimal sums of those rounded lines, so gross − deductions = net to the paisa.
+        const earnings: PayItem[] = [];
+        const deductions: PayItem[] = [];
+        const item = (code: string, name: string, amount: M.MoneyInput): PayItem => ({
+          code,
+          name,
+          amount: M.toNumber(amount),
+        });
 
         const payrollCfg = await tx.employeePayrollConfig.findUnique({
           where: { employeeId: emp.id },
@@ -354,12 +368,8 @@ export class PayrollService {
             deductions.push({ code: 'PT', name: 'Professional Tax', amount: preview.professionalTax });
           }
           for (const custom of cfg.deductions.custom ?? []) {
-            if (custom.amount > 0) {
-              deductions.push({
-                code: 'CUSTOM',
-                name: custom.name,
-                amount: Math.round(custom.amount),
-              });
+            if (M.money(custom.amount).greaterThan(0)) {
+              deductions.push(item('CUSTOM', custom.name, custom.amount));
             }
           }
           const allowanceCodes: Record<string, { code: string; name: string; key: keyof typeof cfg.allowances }> = {
@@ -376,33 +386,29 @@ export class PayrollService {
           for (const meta of Object.values(allowanceCodes)) {
             const amt = cfg.allowances[meta.key];
             if (typeof amt === 'number' && amt > 0) {
-              earnings.push({ code: meta.code, name: meta.name, amount: amt });
+              earnings.push(item(meta.code, meta.name, amt));
             }
           }
           for (const custom of cfg.allowances.custom ?? []) {
-            if (custom.amount > 0) {
-              earnings.push({ code: 'CUSTOM_EARN', name: custom.name, amount: custom.amount });
+            if (M.money(custom.amount).greaterThan(0)) {
+              earnings.push(item('CUSTOM_EARN', custom.name, custom.amount));
             }
           }
         } else if (structure) {
           for (const line of structure.lines) {
-            const item = {
-              code: line.component.code,
-              name: line.component.name,
-              amount: line.amount,
-            };
-            if (line.component.type === SalaryComponentType.EARNING) earnings.push(item);
-            else deductions.push({ ...item });
+            const it = item(line.component.code, line.component.name, line.amount);
+            if (line.component.type === SalaryComponentType.EARNING) earnings.push(it);
+            else deductions.push(it);
           }
         } else {
-          earnings.push({ code: 'BASIC', name: 'Basic', amount: 0 });
+          earnings.push(item('BASIC', 'Basic', 0));
         }
 
-        // LOP deduction proportional to basic
+        // LOP deduction proportional to basic: basic × lopDays ÷ calendar days, rounded once.
         const basic = earnings.find((e) => e.code === 'BASIC')?.amount ?? 0;
         if (lopDays > 0 && basic > 0) {
-          const lopAmt = Math.round((basic / workingDaysApprox) * lopDays);
-          deductions.push({ code: 'LOP', name: 'Loss of Pay', amount: lopAmt });
+          const lopAmt = calcProratedAmount(basic, lopDays, workingDaysApprox);
+          deductions.push(item('LOP', 'Loss of Pay', lopAmt));
         }
 
         // Incentive
@@ -411,16 +417,12 @@ export class PayrollService {
           incentiveAmount > 0 &&
           (counter?.lateMarkCount ?? 0) <= maxLate
         ) {
-          earnings.push({
-            code: 'INCENTIVE',
-            name: 'Attendance Incentive',
-            amount: incentiveAmount,
-          });
+          earnings.push(item('INCENTIVE', 'Attendance Incentive', incentiveAmount));
         }
 
         // ESD (company default — skip when employee payroll config handles it)
         if (!payrollCfg && esdEnabled && esdAmount > 0) {
-          deductions.push({ code: 'ESD', name: 'Security Deposit', amount: esdAmount });
+          deductions.push(item('ESD', 'Security Deposit', esdAmount));
         }
 
         // Loan EMI
@@ -435,20 +437,17 @@ export class PayrollService {
             },
           },
         });
-        let loanEmi = 0;
-        for (const loan of loans) {
-          for (const emi of loan.emis) loanEmi += emi.amount;
-        }
-        if (loanEmi > 0) {
-          deductions.push({ code: 'LOAN_EMI', name: 'Loan/Advance EMI', amount: loanEmi });
+        const loanEmi = M.sum(loans.flatMap((loan) => loan.emis.map((emi) => emi.amount)));
+        if (loanEmi.greaterThan(0)) {
+          deductions.push(item('LOAN_EMI', 'Loan/Advance EMI', loanEmi));
         }
 
         const damages = await tx.assetDamageCharge.findMany({
           where: { employeeId: emp.id, status: DamageChargeStatus.PENDING },
         });
-        const damageTotal = damages.reduce((s, d) => s + d.amount, 0);
-        if (damageTotal > 0) {
-          deductions.push({ code: 'ASSET_DAMAGE', name: 'Asset Damage', amount: damageTotal });
+        const damageTotal = M.sumBy(damages, (d) => d.amount);
+        if (damageTotal.greaterThan(0)) {
+          deductions.push(item('ASSET_DAMAGE', 'Asset Damage', damageTotal));
         }
 
         // Approved reimbursements not yet paid
@@ -459,14 +458,12 @@ export class PayrollService {
             paidInPayrollId: null,
           },
         });
-        const reimbTotal = reimbursements.reduce((s, r) => s + r.amount, 0);
-        if (reimbTotal > 0) {
-          earnings.push({ code: 'REIMB', name: 'Reimbursement', amount: reimbTotal });
+        const reimbTotal = M.sumBy(reimbursements, (r) => r.amount);
+        if (reimbTotal.greaterThan(0)) {
+          earnings.push(item('REIMB', 'Reimbursement', reimbTotal));
         }
 
-        const gross = earnings.reduce((s, e) => s + e.amount, 0);
-        const ded = deductions.reduce((s, d) => s + d.amount, 0);
-        const net = Math.max(0, Math.round((gross - ded) * 100) / 100);
+        const { gross, totalDeductions: ded, net } = calcPayslipTotals(earnings, deductions);
 
         await tx.payrollLine.create({
           data: {
@@ -475,9 +472,9 @@ export class PayrollService {
             employeeId: emp.id,
             earningsJson: earnings,
             deductionsJson: deductions,
-            grossEarnings: gross,
-            totalDeductions: ded,
-            netPay: net,
+            grossEarnings: M.toDb(gross),
+            totalDeductions: M.toDb(ded),
+            netPay: M.toDb(net),
             attendanceDays: presentDays,
             lopDays,
           },
@@ -537,21 +534,23 @@ export class PayrollService {
             },
           });
           for (const loan of loans) {
-            let recovered = 0;
+            let recovered = M.money(0);
             for (const emi of loan.emis) {
               await tx.loanEmiSchedule.update({
                 where: { id: emi.id },
                 data: { paidAt: new Date() },
               });
-              recovered += emi.amount;
+              recovered = recovered.plus(emi.amount);
             }
-            if (recovered > 0) {
-              const outstanding = Math.max(0, loan.outstanding - recovered);
+            if (recovered.greaterThan(0)) {
+              const outstanding = M.toDb(M.nonNegative(M.sub(loan.outstanding, recovered)));
               await tx.loanAdvance.update({
                 where: { id: loan.id },
                 data: {
                   outstanding,
-                  status: outstanding <= 0 ? LoanAdvanceStatus.CLOSED : LoanAdvanceStatus.ACTIVE,
+                  status: outstanding.lessThanOrEqualTo(0)
+                    ? LoanAdvanceStatus.CLOSED
+                    : LoanAdvanceStatus.ACTIVE,
                 },
               });
               await tx.loanRecoveryEntry.create({
@@ -559,7 +558,7 @@ export class PayrollService {
                   loanAdvanceId: loan.id,
                   year,
                   month,
-                  amount: recovered,
+                  amount: M.toDb(recovered),
                   payrollRunId: run.id,
                   note: 'Auto payroll recovery',
                 },
@@ -574,32 +573,33 @@ export class PayrollService {
             where: { employeeId: line.employeeId },
             orderBy: { createdAt: 'desc' },
           });
-          let bal = last?.balanceAfter ?? 0;
-          bal += esdAmount;
+          const deposit = M.round2(esdAmount);
+          let bal = M.money(last?.balanceAfter).plus(deposit);
           await tx.esdLedgerEntry.create({
             data: {
               companyId: user.companyId,
               employeeId: line.employeeId,
               entryType: EsdEntryType.DEPOSIT,
-              amount: esdAmount,
-              balanceAfter: bal,
+              amount: deposit,
+              balanceAfter: M.toDb(bal),
               year,
               month,
               note: 'Monthly ESD via payroll',
               createdBy: user.id,
             },
           });
-          if (interestRate > 0 && bal > 0) {
-            const interest = Math.round(((bal * interestRate) / 100 / 12) * 100) / 100;
-            if (interest > 0) {
-              bal += interest;
+          if (interestRate > 0 && bal.greaterThan(0)) {
+            // Monthly interest = balance × annual% ÷ 12, rounded HALF_UP to 2dp.
+            const interest = M.round2(M.div(M.percentOf(bal, interestRate), 12));
+            if (interest.greaterThan(0)) {
+              bal = bal.plus(interest);
               await tx.esdLedgerEntry.create({
                 data: {
                   companyId: user.companyId,
                   employeeId: line.employeeId,
                   entryType: EsdEntryType.INTEREST,
                   amount: interest,
-                  balanceAfter: bal,
+                  balanceAfter: M.toDb(bal),
                   year,
                   month,
                   note: 'Monthly compounded interest',
@@ -713,7 +713,7 @@ export class PayrollService {
       action: AuditAction.UPDATE,
       entityType: 'PayrollLine',
       entityId: lineId,
-      metadata: { event: 'marked_paid', amount: line.netPay },
+      metadata: { event: 'marked_paid', amount: M.toNumber(line.netPay) },
     });
 
     return updated;
@@ -754,14 +754,9 @@ export class PayrollService {
   async requestLoan(user: AuthUser, dto: RequestLoanDto) {
     if (!user.employeeId) throw new ForbiddenException();
     const rate = dto.interestRate ?? 0;
-    const principal = dto.amount;
+    const principal = M.toDb(dto.amount);
     const n = dto.tenureMonths;
-    const r = rate / 100 / 12;
-    const emi =
-      r === 0
-        ? Math.round((principal / n) * 100) / 100
-        : Math.round(((principal * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1)) * 100) /
-          100;
+    const emi = M.toDb(calcEmi(principal, rate, n));
 
     const loan = await this.prisma.loanAdvance.create({
       data: {
@@ -785,7 +780,7 @@ export class PayrollService {
         entityType: 'LoanAdvance',
         entityId: loan.id,
         requesterId: user.employeeId,
-        summary: `${dto.type} ${principal}`,
+        summary: `${dto.type} ${M.toFixed2(principal)}`,
       });
     } catch {
       // non-fatal
@@ -845,16 +840,21 @@ export class PayrollService {
     }
 
     const now = new Date();
-    const emis = [];
-    for (let i = 0; i < loan.tenureMonths; i++) {
+    // Interest-free loans: last installment absorbs the paise remainder so the loan closes at 0.
+    const emis = buildEmiAmounts({
+      principal: loan.amount,
+      emiAmount: loan.emiAmount,
+      tenureMonths: loan.tenureMonths,
+      interestRate: loan.interestRate,
+    }).map((amount, i) => {
       const d = new Date(now.getFullYear(), now.getMonth() + i + 1, 1);
-      emis.push({
+      return {
         installmentNo: i + 1,
         dueYear: d.getFullYear(),
         dueMonth: d.getMonth() + 1,
-        amount: loan.emiAmount,
-      });
-    }
+        amount,
+      };
+    });
 
     const activated = await this.prisma.loanAdvance.update({
       where: { id },
@@ -901,7 +901,7 @@ export class PayrollService {
         companyId: user.companyId,
         employeeId: user.employeeId,
         category: dto.category,
-        amount: dto.amount,
+        amount: M.toDb(dto.amount),
         description: dto.description,
         receiptUrl: dto.receiptUrl,
       },
@@ -913,7 +913,7 @@ export class PayrollService {
         entityType: 'ReimbursementClaim',
         entityId: claim.id,
         requesterId: user.employeeId,
-        summary: `${dto.category} ${dto.amount}`,
+        summary: `${dto.category} ${M.toFixed2(dto.amount)}`,
       });
     } catch {
       // non-fatal

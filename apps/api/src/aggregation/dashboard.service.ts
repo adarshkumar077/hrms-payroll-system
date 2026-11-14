@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
 import { calcDailySalary, calendarDaysInMonth } from '../payroll/payroll-calculator';
+import * as M from '../common/money';
 
 const CACHE_TTL_MS = 5 * 60_000;
 
@@ -96,7 +97,7 @@ export class DashboardService {
         })),
       openTickets,
       activeLoans: loans.length,
-      loanOutstanding: loans.reduce((s, l) => s + l.outstanding, 0),
+      loanOutstanding: M.toNumber(M.sumBy(loans, (l) => l.outstanding)),
       latestPayslip: latestPayslip
         ? {
             netPay: latestPayslip.netPay,
@@ -212,8 +213,8 @@ export class DashboardService {
       orderBy: [{ year: 'desc' }, { month: 'desc' }],
     });
     const payrollCost = lastPayroll
-      ? lastPayroll.lines.reduce((s, l) => s + l.netPay, 0)
-      : 0;
+      ? M.sumBy(lastPayroll.lines, (l) => l.netPay)
+      : M.money(0);
 
     // Department cost proxy: active structures monthly earn sum by dept
     const structures = await this.prisma.employeeSalaryStructure.findMany({
@@ -227,10 +228,11 @@ export class DashboardService {
     for (const s of structures) {
       if (!s.employee.isActive) continue;
       const d = s.employee.department ?? 'Unassigned';
-      const monthly = s.lines
-        .filter((l) => l.component.type === 'EARNING')
-        .reduce((sum, l) => sum + l.amount, 0);
-      deptCost[d] = (deptCost[d] ?? 0) + monthly;
+      const monthly = M.sumBy(
+        s.lines.filter((l) => l.component.type === 'EARNING'),
+        (l) => l.amount,
+      );
+      deptCost[d] = M.toNumber(M.add(deptCost[d] ?? 0, monthly));
     }
 
     const attendanceRecords = await this.prisma.attendanceRecord.findMany({
@@ -254,13 +256,13 @@ export class DashboardService {
       where: { companyId, isActive: true },
       select: { id: true },
     });
-    let depositLiabilities = 0;
+    let depositLiabilities = M.money(0);
     for (const e of esdEmployees) {
       const last = await this.prisma.esdLedgerEntry.findFirst({
         where: { employeeId: e.id },
         orderBy: { createdAt: 'desc' },
       });
-      depositLiabilities += last?.balanceAfter ?? 0;
+      depositLiabilities = depositLiabilities.plus(M.money(last?.balanceAfter));
     }
 
     const pendingOnboarding = await this.prisma.onboardingChecklist.count({
@@ -269,7 +271,7 @@ export class DashboardService {
 
     const metrics = {
       totalEmployees,
-      payrollCost: Math.round(payrollCost * 100) / 100,
+      payrollCost: M.toNumber(payrollCost),
       lastPayrollPeriod: lastPayroll
         ? { year: lastPayroll.year, month: lastPayroll.month }
         : null,
@@ -279,10 +281,10 @@ export class DashboardService {
       employeeGrowth: hiredThisYear,
       attritionRate,
       liabilities: {
-        loans: loanLiabilities._sum.outstanding ?? 0,
-        deposits: Math.round(depositLiabilities * 100) / 100,
+        loans: M.toNumber(loanLiabilities._sum.outstanding),
+        deposits: M.toNumber(depositLiabilities),
       },
-      depositLiabilities: Math.round(depositLiabilities * 100) / 100,
+      depositLiabilities: M.toNumber(depositLiabilities),
       hiringStatus: {
         hiredThisYear,
         pendingOnboarding,

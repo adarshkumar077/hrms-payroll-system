@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationChannel, NotificationStatus } from '@prisma/client';
 import { buildExport, rowsToCsv } from '../common/export.engine';
+import * as M from '../common/money';
 
 function avail(b: {
   opening: number;
@@ -181,20 +182,21 @@ export class ReportsService {
     const rows = structures
       .filter((s) => s.employee.isActive)
       .map((s) => {
-        const monthly = s.lines
-          .filter((l) => l.component.type === 'EARNING')
-          .reduce((sum, l) => sum + l.amount, 0);
+        const monthly = M.sumBy(
+          s.lines.filter((l) => l.component.type === 'EARNING'),
+          (l) => l.amount,
+        );
         return {
           employeeCode: s.employee.employeeCode,
           name: `${s.employee.firstName} ${s.employee.lastName ?? ''}`.trim(),
           department: s.employee.department ?? '',
-          ctcAnnual: s.ctcAnnual,
-          monthlyEarnings: monthly,
+          ctcAnnual: M.toNumber(s.ctcAnnual),
+          monthlyEarnings: M.toNumber(monthly),
         };
       });
     const byDept: Record<string, number> = {};
     for (const r of rows) {
-      byDept[r.department] = (byDept[r.department] ?? 0) + r.monthlyEarnings;
+      byDept[r.department] = M.toNumber(M.add(byDept[r.department] ?? 0, r.monthlyEarnings));
     }
     return { rows, departmentMonthlyCost: byDept };
   }
@@ -470,7 +472,16 @@ export class ReportsService {
     };
   }
 
+  /** Report rows with Prisma.Decimal money converted to 2dp numbers (API, exports, AI). */
   async resolveReport(
+    companyId: string,
+    kind: string,
+    query: { year?: number; month?: number; limit?: number },
+  ): Promise<{ title: string; rows: Record<string, unknown>[] }> {
+    return M.serializeMoney(await this.resolveReportRaw(companyId, kind, query));
+  }
+
+  private async resolveReportRaw(
     companyId: string,
     kind: string,
     query: { year?: number; month?: number; limit?: number },
@@ -535,7 +546,16 @@ export class ReportsService {
     }
   }
 
+  /** Balance-sheet rows with Prisma.Decimal money converted to 2dp numbers. */
   async resolveBalance(
+    companyId: string,
+    kind: string,
+    query: { year?: number; month?: number },
+  ): Promise<{ title: string; rows: Record<string, unknown>[] }> {
+    return M.serializeMoney(await this.resolveBalanceRaw(companyId, kind, query));
+  }
+
+  private async resolveBalanceRaw(
     companyId: string,
     kind: string,
     query: { year?: number; month?: number },
@@ -597,7 +617,7 @@ export class ReportsService {
     rows: Record<string, unknown>[],
     recipientHint?: string,
   ) {
-    const csv = rowsToCsv(rows);
+    const csv = rowsToCsv(M.serializeMoney(rows));
     await this.prisma.notification.create({
       data: {
         companyId,

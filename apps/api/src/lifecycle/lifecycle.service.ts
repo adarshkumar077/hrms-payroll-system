@@ -28,6 +28,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
 import { WorkflowService } from '../workflow/workflow.service';
 import { StorageService } from '../documents/storage.service';
+import * as M from '../common/money';
 import {
   AllocateAssetDto,
   ReturnAssetDto,
@@ -240,7 +241,7 @@ export class LifecycleService {
         brand: dto.brand,
         model: dto.model,
         purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : undefined,
-        purchaseCost: dto.purchaseCost,
+        purchaseCost: M.toDbOrNull(dto.purchaseCost) ?? undefined,
         notes: dto.notes,
       },
     });
@@ -344,7 +345,7 @@ export class LifecycleService {
         companyId: user.companyId,
         assetId,
         employeeId,
-        amount: dto.amount,
+        amount: M.toDb(dto.amount),
         description: dto.description,
         createdBy: user.id,
       },
@@ -637,13 +638,13 @@ export class LifecycleService {
       where: { employeeId: empId, isActive: true },
       include: { lines: { include: { component: true } } },
     });
-    const monthlyGross =
-      structure?.lines
-        .filter((l) => l.component.type === 'EARNING')
-        .reduce((s, l) => s + l.amount, 0) ?? 0;
+    const monthlyGross = M.sumBy(
+      (structure?.lines ?? []).filter((l) => l.component.type === 'EARNING'),
+      (l) => l.amount,
+    );
 
     // Pending salary: half-month proxy (config-free MVP)
-    const pendingSalary = Math.round((monthlyGross / 2) * 100) / 100;
+    const pendingSalary = M.toNumber(M.div(monthlyGross, 2));
 
     const year = new Date().getFullYear();
     const leaveBalances = await this.prisma.leaveBalance.findMany({
@@ -653,24 +654,24 @@ export class LifecycleService {
     const encashable = leaveBalances
       .filter((b) => b.leaveType.code === 'EL')
       .reduce((s, b) => s + (b.opening + b.accrued + b.carriedForward + b.adjusted - b.used - b.encashed), 0);
-    const perDay = monthlyGross / 30;
-    const leaveEncash = Math.round(encashable * perDay * 100) / 100;
+    // Encashment = monthly gross × encashable days ÷ 30, exact then rounded once.
+    const leaveEncash = M.toNumber(M.div(M.mul(monthlyGross, encashable), 30));
 
     const esdLast = await this.prisma.esdLedgerEntry.findFirst({
       where: { employeeId: empId },
       orderBy: { createdAt: 'desc' },
     });
-    const esdRefund = esdLast?.balanceAfter ?? 0;
+    const esdRefund = M.toNumber(esdLast?.balanceAfter);
 
     const loans = await this.prisma.loanAdvance.findMany({
       where: { employeeId: empId, status: LoanAdvanceStatus.ACTIVE },
     });
-    const loanOutstanding = loans.reduce((s, l) => s + l.outstanding, 0);
+    const loanOutstanding = M.toNumber(M.sumBy(loans, (l) => l.outstanding));
 
     const damages = await this.prisma.assetDamageCharge.findMany({
       where: { employeeId: empId, status: DamageChargeStatus.PENDING },
     });
-    const damageTotal = damages.reduce((s, d) => s + d.amount, 0);
+    const damageTotal = M.toNumber(M.sumBy(damages, (d) => d.amount));
 
     type Line = { code: string; name: string; side: 'CREDIT' | 'DEBIT'; amount: number };
     const lines: Line[] = [];
@@ -690,9 +691,9 @@ export class LifecycleService {
       lines.push({ code: 'ASSET_DAMAGE', name: 'Asset damage charges', side: 'DEBIT', amount: damageTotal });
     }
 
-    const grossCredits = lines.filter((l) => l.side === 'CREDIT').reduce((s, l) => s + l.amount, 0);
-    const grossDebits = lines.filter((l) => l.side === 'DEBIT').reduce((s, l) => s + l.amount, 0);
-    const netPayable = Math.round((grossCredits - grossDebits) * 100) / 100;
+    const grossCredits = M.toDb(M.sumBy(lines.filter((l) => l.side === 'CREDIT'), (l) => l.amount));
+    const grossDebits = M.toDb(M.sumBy(lines.filter((l) => l.side === 'DEBIT'), (l) => l.amount));
+    const netPayable = M.toDb(grossCredits.minus(grossDebits));
 
     const emp = res.employee;
     const company = await this.prisma.company.findUniqueOrThrow({
@@ -820,13 +821,13 @@ export class LifecycleService {
         where: { employeeId: res.employeeId },
         orderBy: { createdAt: 'desc' },
       });
-      if (esdLast && esdLast.balanceAfter > 0) {
+      if (esdLast && esdLast.balanceAfter.greaterThan(0)) {
         await tx.esdLedgerEntry.create({
           data: {
             companyId: user.companyId,
             employeeId: res.employeeId,
             entryType: EsdEntryType.REFUND,
-            amount: -esdLast.balanceAfter,
+            amount: esdLast.balanceAfter.negated(),
             balanceAfter: 0,
             year: new Date().getFullYear(),
             month: new Date().getMonth() + 1,

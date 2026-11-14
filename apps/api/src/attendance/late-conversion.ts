@@ -1,4 +1,5 @@
 /** Month-scoped late → half-day policy helpers (3 late marks = 1 HD by default). */
+import * as M from '../common/money';
 
 export function lateMarksToHalfDays(lateMarks: number, threshold = 3) {
   const late = Math.max(0, Math.floor(lateMarks));
@@ -99,7 +100,7 @@ export function aggregateEmployeeMonth(
   opts?: { lateToHalf?: number },
 ): EmployeeMonthAgg {
   const lateToHalf = opts?.lateToHalf ?? 3;
-  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const round2 = M.toNumber;
 
   let presentDays = 0;
   let absentDays = 0;
@@ -124,7 +125,7 @@ export function aggregateEmployeeMonth(
     const s = d.status;
     // Monthly total: blank absent cells contribute 0 (not −daily). Other statuses use stored earnings.
     if (s !== 'A' && s !== 'ULOB' && d.todaysEarnings != null) {
-      netPayable = round2(netPayable + d.todaysEarnings);
+      netPayable = round2(M.add(netPayable, d.todaysEarnings));
     }
 
     if (PRESENT.has(s)) {
@@ -156,14 +157,13 @@ export function aggregateEmployeeMonth(
 
   const { convertedHd, remainingLate } = lateMarksToHalfDays(lateMarks, lateToHalf);
 
-  const absentDeduction = round2((absentDays + unpaidLeaves) * daily);
-  const normalHalfDayDeduction = round2(normalHalfDays * (daily / 2));
+  const absentDeduction = round2(M.mul(daily, absentDays + unpaidLeaves));
+  const normalHalfDayDeduction = round2(M.div(M.mul(daily, normalHalfDays), 2));
   // Late conversion deduction: policy floor(lates/threshold) — matches 3/6/9/12 rule.
-  const lateConversionDeduction = round2(convertedHd * (daily / 2));
+  const lateConversionDeduction = round2(M.div(M.mul(daily, convertedHd), 2));
 
-  const paidDays = round2(
-    presentDays + paidLeaves + weeklyOffs + paidHolidays + halfDays * 0.5,
-  );
+  // Day count (not money) — integers + halves, exact in binary floating point.
+  const paidDays = presentDays + paidLeaves + weeklyOffs + paidHolidays + halfDays * 0.5;
 
   return {
     presentDays,
