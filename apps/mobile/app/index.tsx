@@ -11,14 +11,21 @@ export default function Index() {
   async function login() {
     setLoading(true);
     try {
-      const data = await apiPublic<{ accessToken: string; user?: { roles?: string[] } }>(
-        '/auth/login',
-        {
-          method: 'POST',
-          body: JSON.stringify({ identifier, password }),
-        },
-      );
+      const data = await apiPublic<{
+        accessToken: string;
+        user?: { roles?: string[]; forcePasswordChange?: boolean };
+      }>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ identifier, password }),
+      });
       const roles = (data.user?.roles ?? []).join(',');
+      if (data.user?.forcePasswordChange) {
+        router.push({
+          pathname: '/change-password',
+          params: { token: data.accessToken, roles },
+        });
+        return;
+      }
       router.push({
         pathname: '/home',
         params: { token: data.accessToken, roles },
