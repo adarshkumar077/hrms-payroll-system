@@ -204,6 +204,7 @@ Tasks in the same wave touch different files, so they run in parallel. Each one 
   - Add CSRF protection for cookie-authenticated routes.
   - Add a strict CSP via Next headers.
   - The mobile app keeps bearer tokens in SecureStore.
+  - **Enforce `forcePasswordChange` on the server** (found in T2): add a global guard that returns 403 for every route except change-password, logout and `auth/me` while the flag is set, plus a web route guard that keeps the user on `/account/password`.
 - **Acceptance:**
   - No tokens appear in `localStorage`.
   - Login, refresh, logout and 2FA work end to end; test with a browser run.
@@ -243,13 +244,13 @@ Tasks in the same wave touch different files, so they run in parallel. Each one 
 
 | Task | Model | Wave | Status | Branch |
 |---|---|---|---|---|
-| T1 Secrets and env | Haiku | 1 | ⏳ | |
-| T2 Bootstrap admin | Sonnet | 1 | ⏳ | |
-| T3 API hardening | Sonnet | 1 | ⏳ | |
-| T4 Remove CRM | Sonnet | 1 | ⏳ | |
-| T5 Docs and junk | Haiku | 1 | ⏳ | |
-| T6 Dependency upgrades | Sonnet | 2 | ⏳ | |
-| T7 Money as Decimal | Opus | 2 | ⏳ | |
+| T1 Secrets and env | Haiku | 1 | ✅ merged | |
+| T2 Bootstrap admin | Sonnet | 1 | ✅ merged | |
+| T3 API hardening | Sonnet | 1 | ✅ merged (+ proxy-trust fix) | |
+| T4 Remove CRM | Sonnet | 1 | ✅ merged | |
+| T5 Docs and junk | Haiku | 1 | 🔄 running | |
+| T6 Dependency upgrades | Sonnet | 2 | 🔄 running | |
+| T7 Money as Decimal | Opus | 2 | 🔄 running | |
 | T8 ESLint and CI | Sonnet | 2 (after T6) | ⏳ | |
 | T9 Statutory engine | Opus | 3 | ⏳ | |
 | T10 Statutory exports | Sonnet | 3 (after T9) | ⏳ | |
