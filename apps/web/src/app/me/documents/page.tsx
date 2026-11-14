@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, getToken, getStoredUser, getApiBaseUrl } from '@/lib/api';
+import { api, getStoredUser, getApiBaseUrl, authFetch } from '@/lib/api';
 
 
 
@@ -32,10 +32,7 @@ export default function MyDocumentsPage() {
 
   async function download(d: Doc) {
     try {
-      const token = getToken();
-      const res = await fetch(`${getApiBaseUrl()}/documents/${d.id}/download`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await authFetch(`${getApiBaseUrl()}/documents/${d.id}/download`);
       if (!res.ok) {
         setError('Download failed');
         return;

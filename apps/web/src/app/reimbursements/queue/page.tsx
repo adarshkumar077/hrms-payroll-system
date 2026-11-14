@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, getStoredUser, getToken, getApiBaseUrl } from '@/lib/api';
+import { api, getStoredUser, getApiBaseUrl, authFetch } from '@/lib/api';
 
 
 
@@ -77,11 +77,8 @@ export default function ReimbursementQueuePage() {
   async function exportReport(fmt: 'excel' | 'pdf') {
     setError('');
     try {
-      const token = getToken();
       const path = `/reports/reimbursements/export/${fmt}`;
-      const res = await fetch(`${getApiBaseUrl()}${path}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await authFetch(`${getApiBaseUrl()}${path}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { message?: string }).message ?? `Export failed (${res.status})`);

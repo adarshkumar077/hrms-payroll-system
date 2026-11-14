@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { api, getToken, getStoredUser, getApiBaseUrl } from '@/lib/api';
+import { api, getStoredUser, getApiBaseUrl, authFetch } from '@/lib/api';
 import { buildEmployeeUpdatePayload } from '@/lib/employee-payload';
 import {
   EMPLOYEE_CODE_EXISTS_MSG,
@@ -340,20 +340,14 @@ export default function EmployeeDetailPage() {
   }
 
   async function viewDoc(doc: Doc) {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/documents/${doc.id}/view`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    const res = await authFetch(`${API_URL}/documents/${doc.id}/view`);
     if (!res.ok) throw new Error('View failed');
     const blob = await res.blob();
     window.open(URL.createObjectURL(blob), '_blank', 'noopener,noreferrer');
   }
 
   async function downloadDoc(doc: Doc) {
-    const token = getToken();
-    const res = await fetch(`${API_URL}/documents/${doc.id}/download`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    const res = await authFetch(`${API_URL}/documents/${doc.id}/download`);
     if (!res.ok) throw new Error('Download failed');
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -370,10 +364,8 @@ export default function EmployeeDetailPage() {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('title', file.name);
-      const token = getToken();
-      const res = await fetch(`${API_URL}/documents/${docId}/replace`, {
+      const res = await authFetch(`${API_URL}/documents/${docId}/replace`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: fd,
       });
       if (!res.ok) {
@@ -403,10 +395,8 @@ export default function EmployeeDetailPage() {
         : [docType, file.name];
       fd.append('documentTypeCode', code);
       fd.append('title', customTitle || file.name);
-      const token = getToken();
-      const res = await fetch(`${API_URL}/employees/${id}/documents`, {
+      const res = await authFetch(`${API_URL}/employees/${id}/documents`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: fd,
       });
       if (!res.ok) {

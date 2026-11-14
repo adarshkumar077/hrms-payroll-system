@@ -51,9 +51,11 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<NextResponse> {
       const outHeaders = new Headers();
       upstream.headers.forEach((value, key) => {
         const k = key.toLowerCase();
-        if (k === 'transfer-encoding' || k === 'connection') return;
+        if (k === 'transfer-encoding' || k === 'connection' || k === 'set-cookie') return;
         outHeaders.set(key, value);
       });
+      // Pass every Set-Cookie through unchanged (the httpOnly refresh cookie from /auth/*).
+      for (const cookie of upstream.headers.getSetCookie()) outHeaders.append('set-cookie', cookie);
 
       const payload = await upstream.arrayBuffer();
       return new NextResponse(payload, { status: upstream.status, headers: outHeaders });

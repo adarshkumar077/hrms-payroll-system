@@ -17,6 +17,29 @@ const nextConfig = {
   ],
   compress: true,
   poweredByHeader: false,
+  /**
+   * Static security headers on every response. The nonce-based Content-Security-Policy is
+   * per-request, so it is set in src/middleware.ts instead.
+   */
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          {
+            key: 'Permissions-Policy',
+            // Selfie capture + GPS attendance need camera/geolocation on our own origin only.
+            value:
+              'camera=(self), geolocation=(self), microphone=(), fullscreen=(self), payment=(), usb=()',
+          },
+          { key: 'X-DNS-Prefetch-Control', value: 'off' },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     const apiInternal = process.env.API_INTERNAL_URL || 'http://127.0.0.1:3001';
     return [

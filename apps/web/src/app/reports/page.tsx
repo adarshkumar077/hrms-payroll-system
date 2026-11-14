@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, getStoredUser, getToken, getApiBaseUrl } from '@/lib/api';
+import { api, getStoredUser, getApiBaseUrl, authFetch } from '@/lib/api';
 
 
 
@@ -99,11 +99,8 @@ export default function ReportsPage() {
     if (!active) return;
     setError('');
     try {
-      const token = getToken();
       const path = `/${active.base}/${active.kind}/export/${fmt}${qs}`;
-      const res = await fetch(`${getApiBaseUrl()}${path}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await authFetch(`${getApiBaseUrl()}${path}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { message?: string }).message ?? `Export failed (${res.status})`);

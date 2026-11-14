@@ -30,6 +30,7 @@ import {
   PROTECTED_SUPER_ADMIN_MSG,
 } from './protected-super-admin';
 import { parseUserAgent } from '../common/ua.util';
+import { refreshTtlDays } from './session-cookie';
 
 const INVALID_LOGIN = 'Invalid User ID/Email or Password.';
 
@@ -373,6 +374,7 @@ export class AuthService {
       moduleAccess: { moduleKey: string; canAccess: boolean }[];
     },
     meta?: { ip?: string; ua?: string },
+    opts: { isRefresh?: boolean } = {},
   ) {
     const roles = user.userRoles.map((ur) => ur.role.code);
     const sessionMinutes = await this.security.getSettingNumber(
@@ -391,8 +393,7 @@ export class AuthService {
     );
 
     const refreshRaw = `${user.id}.${randomInt(1e9)}.${Date.now()}`;
-    const refreshTtl = this.config.get('JWT_REFRESH_TTL', '7d');
-    const refreshDays = refreshTtl.endsWith('d') ? Number(refreshTtl.replace('d', '')) : 7;
+    const refreshDays = refreshTtlDays(this.config);
 
     await this.prisma.refreshToken.create({
       data: {
@@ -404,6 +405,40 @@ export class AuthService {
       },
     });
 
+    // A silent refresh (web does one on every page load) is not a new login: skip
+    // lastLoginAt / LOGIN audit / login-session rows so they keep meaning "user signed in".
+    if (!opts.isRefresh) {
+      await this.recordLogin(user, meta);
+    }
+
+    const mustEnable2fa =
+      roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r)) &&
+      !user.totpEnabled &&
+      (await this.security.getSettingBool(user.companyId, 'security.require_2fa_for_admins', false));
+
+    return {
+      accessToken,
+      refreshToken: refreshRaw,
+      forcePasswordChange: user.forcePasswordChange,
+      mustEnable2fa,
+      expiresInMinutes: Math.max(5, sessionMinutes),
+      user: {
+        id: user.id,
+        companyId: user.companyId,
+        loginId: user.loginId,
+        email: user.email,
+        mobile: user.mobile,
+        displayName: user.displayName,
+        roles,
+        employeeId: user.employeeId,
+        moduleAccess: user.moduleAccess.filter((m) => m.canAccess).map((m) => m.moduleKey),
+        totpEnabled: user.totpEnabled,
+        forcePasswordChange: user.forcePasswordChange,
+      },
+    };
+  }
+
+  private async recordLogin(user: User, meta?: { ip?: string; ua?: string }) {
     await this.prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
@@ -445,35 +480,9 @@ export class AuthService {
         sessionErr instanceof Error ? sessionErr.stack : sessionErr,
       );
     }
-
-    const mustEnable2fa =
-      roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r)) &&
-      !user.totpEnabled &&
-      (await this.security.getSettingBool(user.companyId, 'security.require_2fa_for_admins', false));
-
-    return {
-      accessToken,
-      refreshToken: refreshRaw,
-      forcePasswordChange: user.forcePasswordChange,
-      mustEnable2fa,
-      expiresInMinutes: Math.max(5, sessionMinutes),
-      user: {
-        id: user.id,
-        companyId: user.companyId,
-        loginId: user.loginId,
-        email: user.email,
-        mobile: user.mobile,
-        displayName: user.displayName,
-        roles,
-        employeeId: user.employeeId,
-        moduleAccess: user.moduleAccess.filter((m) => m.canAccess).map((m) => m.moduleKey),
-        totpEnabled: user.totpEnabled,
-        forcePasswordChange: user.forcePasswordChange,
-      },
-    };
   }
 
-  async refresh(refreshToken: string) {
+  async refresh(refreshToken: string, meta?: { ip?: string; ua?: string }) {
     const tokenHash = this.hash(refreshToken);
     const stored = await this.prisma.refreshToken.findFirst({
       where: { tokenHash, revokedAt: null, expiresAt: { gt: new Date() } },
@@ -490,7 +499,13 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
 
-    return this.issueSession(stored.user);
+    // Same statuses JwtStrategy accepts — don't mint tokens for inactive/locked accounts.
+    const status = stored.user.status;
+    if (status !== UserStatus.ACTIVE && status !== UserStatus.PENDING_PASSWORD_CHANGE) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    return this.issueSession(stored.user, meta, { isRefresh: true });
   }
 
   async logout(userId: string, refreshToken?: string) {

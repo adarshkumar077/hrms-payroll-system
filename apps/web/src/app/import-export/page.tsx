@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api, getStoredUser } from '@/lib/api';
+import { api, getStoredUser, authFetch } from '@/lib/api';
 import { isEmployeeUser, isSuperAdmin } from '@/lib/roles';
 import { ModuleAlert, ModuleButton, ModulePage, ModuleSection, ModuleSelect } from '@/components/layout/ModulePage';
 
@@ -30,12 +30,10 @@ export default function ImportExportPage() {
 
   async function runImport(dryRun: boolean) {
     if (!file) return;
-    const token = localStorage.getItem('eitf_access_token');
     const fd = new FormData();
     fd.append('file', file);
-    const res = await fetch(`/api/v1/import/${entity}?dryRun=${dryRun}`, {
+    const res = await authFetch(`/api/v1/import/${entity}?dryRun=${dryRun}`, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: fd,
     });
     const body = await res.json().catch(() => ({}));
@@ -45,10 +43,9 @@ export default function ImportExportPage() {
   }
 
   async function runExport(format: 'CSV' | 'XLSX' | 'PDF') {
-    const token = localStorage.getItem('eitf_access_token');
-    const res = await fetch(`/api/v1/export/${entity}`, {
+    const res = await authFetch(`/api/v1/export/${entity}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ format }),
     });
     if (!res.ok) { setError('Export failed'); return; }

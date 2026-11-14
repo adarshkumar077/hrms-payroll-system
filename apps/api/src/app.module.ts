@@ -30,6 +30,7 @@ import { StudioModule } from './studio/studio.module';
 import { DataExchangeModule } from './data-exchange/data-exchange.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
+import { PasswordChangeGuard } from './auth/guards/password-change.guard';
 import { IpAllowlistGuard } from './security/ip-allowlist.guard';
 import { Require2faGuard } from './security/require-2fa.guard';
 
@@ -67,6 +68,7 @@ import { Require2faGuard } from './security/require-2fa.guard';
     { provide: APP_INTERCEPTOR, useClass: MoneySerializeInterceptor },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: PasswordChangeGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: IpAllowlistGuard },
     { provide: APP_GUARD, useClass: Require2faGuard },

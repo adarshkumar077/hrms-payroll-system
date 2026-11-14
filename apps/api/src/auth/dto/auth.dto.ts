@@ -66,9 +66,11 @@ export class LoginPasswordDto {
 }
 
 export class RefreshTokenDto {
-  @ApiProperty()
+  /** Mobile/API clients send it here; the web app sends it as the httpOnly `eitf_rt` cookie instead. */
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
-  refreshToken!: string;
+  refreshToken?: string;
 }
 
 export class LogoutDto {

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { api, getStoredUser, getToken, getApiBaseUrl } from '@/lib/api';
+import { api, getStoredUser, getApiBaseUrl, authFetch } from '@/lib/api';
 import { isAdmin } from '@/lib/roles';
 import { onAttendanceChanged } from '@/lib/attendance-sync';
 import { SheetQuickActionBar } from '@/components/attendance/SheetQuickActionBar';
@@ -342,11 +342,8 @@ function AttendanceSheetInner() {
   async function exportReport(fmt: 'excel' | 'pdf') {
     setError('');
     try {
-      const token = getToken();
       const path = `/reports/attendance/export/${fmt}?year=${year}&month=${month}`;
-      const res = await fetch(`${getApiBaseUrl()}${path}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await authFetch(`${getApiBaseUrl()}${path}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { message?: string }).message ?? `Export failed (${res.status})`);
@@ -381,16 +378,13 @@ function AttendanceSheetInner() {
     }
     setExporting(scope);
     try {
-      const token = getToken();
       const q = new URLSearchParams({
         year: String(year),
         month: String(month),
         scope,
       });
       if (scope === 'one' && employeeId) q.set('employeeId', employeeId);
-      const res = await fetch(`${getApiBaseUrl()}/attendance/sheet/export/excel?${q}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await authFetch(`${getApiBaseUrl()}/attendance/sheet/export/excel?${q}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { message?: string }).message ?? `Export failed (${res.status})`);

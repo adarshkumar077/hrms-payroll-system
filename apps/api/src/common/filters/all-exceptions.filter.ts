@@ -26,6 +26,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Something went wrong. Please try again.';
+    let code: string | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -35,6 +36,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
       } else if (body && typeof body === 'object' && 'message' in body) {
         const m = (body as { message: string | string[] }).message;
         message = Array.isArray(m) ? m.join(', ') : m;
+      }
+      if (body && typeof body === 'object' && typeof (body as { code?: unknown }).code === 'string') {
+        code = (body as { code: string }).code;
       }
     } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       const mapped = this.mapPrismaError(exception);
@@ -109,6 +113,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     res.status(status).json({
       statusCode: status,
       message,
+      ...(code ? { code } : {}),
       requestId,
       timestamp: new Date().toISOString(),
       path,

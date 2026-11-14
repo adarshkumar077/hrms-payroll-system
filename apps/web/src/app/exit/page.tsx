@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, getStoredUser, getToken, getApiBaseUrl } from '@/lib/api';
+import { api, getStoredUser, getApiBaseUrl, authFetch } from '@/lib/api';
 
 
 
@@ -164,13 +164,11 @@ export default function ExitPage() {
     setUploading(true);
     setError('');
     try {
-      const token = getToken();
       const formData = new FormData();
       formData.append('file', file);
       formData.append('type', docType);
-      await fetch(`${getApiBaseUrl()}/exit/${exitId}/documents`, {
+      await authFetch(`${getApiBaseUrl()}/exit/${exitId}/documents`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
       setMessage('Document uploaded');

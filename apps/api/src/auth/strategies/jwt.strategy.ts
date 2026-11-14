@@ -46,6 +46,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       roles: user.userRoles.filter((ur) => ur.role).map((ur) => ur.role!.code),
       employeeId: user.employeeId,
       moduleAccess: user.moduleAccess.filter((m) => m.canAccess).map((m) => m.moduleKey),
+      forcePasswordChange: user.forcePasswordChange,
     };
   }
 }

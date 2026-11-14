@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { api, getStoredUser, updateStoredUser } from '@/lib/api';
+import { api, getStoredUser, logout, updateStoredUser } from '@/lib/api';
 import { getHomePathForUser } from '@/lib/home';
 
 function ChangePasswordForm() {
@@ -102,6 +102,15 @@ function ChangePasswordForm() {
             <Link href="/dashboard" className="px-4 py-2 text-sm text-ink/60">
               Cancel
             </Link>
+          )}
+          {required && (
+            <button
+              type="button"
+              className="px-4 py-2 text-sm text-ink/60"
+              onClick={() => { void logout().then(() => router.replace('/')); }}
+            >
+              Sign out
+            </button>
           )}
           <button type="submit" disabled={saving} className="btn-primary px-4 py-2 text-sm">
             {saving ? 'Saving…' : 'Update password'}
