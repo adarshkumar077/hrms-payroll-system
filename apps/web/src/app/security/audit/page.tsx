@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, getStoredUser, getToken, getApiBaseUrl } from '@/lib/api';
+import { api, getStoredUser, getApiBaseUrl, authFetch } from '@/lib/api';
 
 
 
@@ -49,10 +49,7 @@ export default function AuditLogPage() {
   }, [router]);
 
   async function exportCsv() {
-    const token = getToken();
-    const res = await fetch(`${getApiBaseUrl()}/security/audit/export/csv?limit=1000`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    const res = await authFetch(`${getApiBaseUrl()}/security/audit/export/csv?limit=1000`);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

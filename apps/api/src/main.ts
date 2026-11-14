@@ -3,7 +3,8 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
-import { json, urlencoded } from 'express';
+import cookieParser from 'cookie-parser';
+import { json, urlencoded, NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { isCorsOriginAllowed, parseTrustProxy } from './common/cors-origin';
 
@@ -20,6 +21,23 @@ async function bootstrap() {
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
+  // JSON-only API: a minimal CSP so a response opened as a document can run nothing.
+  // Swagger UI (non-prod, /api/docs) is excluded. The web app's CSP lives in apps/web/src/middleware.ts.
+  const apiCsp = helmet.contentSecurityPolicy({
+    useDefaults: false,
+    directives: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'none'"],
+      formAction: ["'none'"],
+    },
+  });
+  app.use((req: Request, res: Response, next: NextFunction) =>
+    req.path.startsWith('/api/docs') ? next() : apiCsp(req, res, next),
+  );
+
+  // Reads the httpOnly refresh-token cookie on /auth/refresh and /auth/logout (see auth/session-cookie.ts).
+  app.use(cookieParser());
 
   app.use(json({ limit: '12mb' }));
   app.use(urlencoded({ extended: true, limit: '12mb' }));

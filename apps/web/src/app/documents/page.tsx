@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api, getStoredUser } from '@/lib/api';
+import { api, getStoredUser, authFetch } from '@/lib/api';
 import { isHr, isSuperAdmin } from '@/lib/roles';
 import { ModuleAlert, ModuleButton, ModuleInput, ModulePage, ModuleSecondaryButton, ModuleSection, ModuleSelect } from '@/components/layout/ModulePage';
 
@@ -32,10 +32,8 @@ export default function DocumentsLibraryPage() {
     fd.append('file', file);
     fd.append('folder', folder);
     fd.append('title', title || file.name);
-    const token = localStorage.getItem('eitf_access_token');
-    const res = await fetch('/api/v1/library/documents', {
+    const res = await authFetch('/api/v1/library/documents', {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: fd,
     });
     if (!res.ok) { setError('Upload failed'); return; }

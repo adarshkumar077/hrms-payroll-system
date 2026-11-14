@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { Inter, Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import { PortalShell } from '@/components/layout/PortalShell';
@@ -23,7 +24,10 @@ export const metadata: Metadata = {
   description: 'Premium enterprise HRMS & Payroll platform for modern organizations.',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Reading request headers opts every page into dynamic rendering, which the per-request CSP
+  // nonce from middleware.ts requires (static HTML would carry no nonce and be blocked).
+  await headers();
   return (
     <html lang="en" className={`${inter.variable} ${jakarta.variable}`}>
       <body className="font-sans">

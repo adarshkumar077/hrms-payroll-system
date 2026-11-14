@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, clearSession, getStoredUser, setSession, SessionUser } from '@/lib/api';
+import { acceptSession, api, initSession, logout, SessionUser } from '@/lib/api';
 import { getHomePathForUser } from '@/lib/home';
 
 type LoginMode = 'password' | 'otp';
@@ -28,11 +28,19 @@ export default function LoginPage() {
   const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
 
   useEffect(() => {
-    const u = getStoredUser();
-    if (!u) return;
-    router.replace(
-      u.forcePasswordChange ? '/account/password?required=true' : getHomePathForUser(u),
-    );
+    // Already signed in (httpOnly refresh cookie still valid)? Skip the login form.
+    let cancelled = false;
+    initSession()
+      .then((u) => {
+        if (cancelled || !u) return;
+        router.replace(
+          u.forcePasswordChange ? '/account/password?required=true' : getHomePathForUser(u),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   useEffect(() => {
@@ -66,7 +74,6 @@ export default function LoginPage() {
     try {
       const data = await api<{
         accessToken: string;
-        refreshToken: string;
         user: SessionUser;
         forcePasswordChange?: boolean;
       }>(
@@ -83,14 +90,7 @@ export default function LoginPage() {
           }),
         },
       );
-      setSession(data.accessToken, data.refreshToken, {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      });
-      const nextUser = {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      };
+      const nextUser = acceptSession(data);
       router.push(
         nextUser.forcePasswordChange ? '/account/password?required=true' : getHomePathForUser(nextUser),
       );
@@ -108,7 +108,6 @@ export default function LoginPage() {
     try {
       const data = await api<{
         accessToken: string;
-        refreshToken: string;
         user: SessionUser;
         forcePasswordChange?: boolean;
       }>('/auth/login', {
@@ -118,14 +117,7 @@ export default function LoginPage() {
         timeoutMs: 20000,
         body: JSON.stringify({ identifier, password, totpCode: totpCode || undefined }),
       });
-      setSession(data.accessToken, data.refreshToken, {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      });
-      const nextUser = {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      };
+      const nextUser = acceptSession(data);
       router.push(
         nextUser.forcePasswordChange ? '/account/password?required=true' : getHomePathForUser(nextUser),
       );
@@ -157,7 +149,6 @@ export default function LoginPage() {
     try {
       const data = await api<{
         accessToken: string;
-        refreshToken: string;
         user: SessionUser;
         forcePasswordChange?: boolean;
       }>('/auth/otp/verify', {
@@ -165,14 +156,7 @@ export default function LoginPage() {
         auth: false,
         body: JSON.stringify({ mobile, code: otp, totpCode: totpCode || undefined }),
       });
-      setSession(data.accessToken, data.refreshToken, {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      });
-      const nextUser = {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      };
+      const nextUser = acceptSession(data);
       router.push(
         nextUser.forcePasswordChange ? '/account/password?required=true' : getHomePathForUser(nextUser),
       );
@@ -431,7 +415,7 @@ export default function LoginPage() {
           <button
             type="button"
             className="mt-6 text-xs text-ink-400 hover:text-ink-600 transition-colors"
-            onClick={() => { clearSession(); setError(''); }}
+            onClick={() => { void logout(); setError(''); }}
           >
             Clear local session
           </button>

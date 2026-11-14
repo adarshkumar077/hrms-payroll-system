@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, getStoredUser, getApiBaseUrl, getToken } from '@/lib/api';
+import { api, getStoredUser, getApiBaseUrl, authFetch } from '@/lib/api';
 
 type EsdRow = {
   employeeCode: string;
@@ -125,14 +125,13 @@ export default function EsdSheetPage() {
   }
 
   function exportFile(format: 'excel' | 'pdf') {
-    const token = getToken();
     const baseUrl = getApiBaseUrl();
     const params = new URLSearchParams();
     if (filterMonth) params.set('month', filterMonth);
     if (filterYear) params.set('year', filterYear);
     if (searchQuery) params.set('search', searchQuery);
     const url = `${baseUrl}/reports/esd/export/${format}?${params.toString()}`;
-    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    authFetch(url)
       .then((res) => {
         if (!res.ok) throw new Error(String(res.status));
         return res.blob();
