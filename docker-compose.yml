@@ -1,4 +1,4 @@
-# EITF HRMS + Payroll + CRM — Production stack
+# EITF HRMS + Payroll — Production stack
 # One command: docker compose --env-file .env.production up -d --build
 #
 # Public access options (pick one):

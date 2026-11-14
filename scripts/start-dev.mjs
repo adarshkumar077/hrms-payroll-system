@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Start local HRMS stack (DB must already be running: npm run db:up).
- * CRM/Orbit is not started.
+ *
  */
 import { spawn } from 'node:child_process';
 import { networkInterfaces } from 'node:os';

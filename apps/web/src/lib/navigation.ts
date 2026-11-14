@@ -56,7 +56,7 @@ export type NavItem = {
   children?: NavItem[];
 };
 
-/** HR Attendance & Payroll focused navigation — CRM removed. */
+/** HR Attendance & Payroll focused navigation. */
 export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Overview',

@@ -66,12 +66,6 @@ async function main() {
     ['attendance-punch-out', () => fetch(`${base}/api/v1/me/attendance/mark`, { method: 'POST', headers, body: JSON.stringify({ type: 'OUT' }) }).then((r) => { if (!r.ok && r.status !== 409) throw new Error(String(r.status)); })],
     ['leave-balances', () => fetch(`${base}/api/v1/me/leave/balances`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
     ['payroll-runs', () => fetch(`${base}/api/v1/payroll/runs`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
-    ['crm-leads', () => fetch(`${base}/api/v1/crm/leads`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
-    ['crm-tasks', () => fetch(`${base}/api/v1/crm/tasks`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
-    ['crm-lead-create', () => fetch(`${base}/api/v1/crm/leads`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ name: `LoadTest ${Date.now()}`, phone: '9999999999', source: 'load-test' }),
-    }).then((r) => { if (!r.ok && r.status !== 403) throw new Error(String(r.status)); })],
     ['profile', () => fetch(`${base}/api/v1/me/profile`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
     ['notifications', () => fetch(`${base}/api/v1/notifications/mine`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
     ['web-home', () => fetch(`${base}/`).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
