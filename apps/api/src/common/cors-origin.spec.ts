@@ -42,7 +42,8 @@ test('dev: LAN/loopback/tunnels allowed, others blocked', () => {
 });
 
 test('parseTrustProxy', () => {
-  assert.equal(parseTrustProxy(undefined), 1);
+  assert.deepEqual(parseTrustProxy(undefined), ['loopback', 'linklocal', 'uniquelocal']);
+  assert.equal(parseTrustProxy('1'), 1);
   assert.equal(parseTrustProxy('2'), 2);
   assert.equal(parseTrustProxy('true'), true);
   assert.equal(parseTrustProxy('false'), false);

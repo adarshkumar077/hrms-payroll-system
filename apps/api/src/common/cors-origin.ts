@@ -47,10 +47,19 @@ export function isCorsOriginAllowed(origin: string | undefined, opts: CorsOrigin
   );
 }
 
-/** Parse TRUST_PROXY: number, 'true'/'false', or comma-separated subnet list. Default 1. */
+/**
+ * Default trust: only loopback / link-local / private-network hops (nginx, cloudflared,
+ * Docker bridge). Express then walks X-Forwarded-For from the right, skipping those hops,
+ * and stops at the first public address, so req.ip is the real client and a client-supplied
+ * X-Forwarded-For prefix is ignored. Works for both "nginx -> api" and
+ * "Cloudflare Tunnel -> nginx -> api" without counting hops.
+ */
+export const DEFAULT_TRUST_PROXY = ['loopback', 'linklocal', 'uniquelocal'];
+
+/** Parse TRUST_PROXY: number, 'true'/'false', or comma-separated subnet / preset list. */
 export function parseTrustProxy(raw?: string): number | boolean | string[] {
   const v = (raw ?? '').trim();
-  if (!v) return 1;
+  if (!v) return [...DEFAULT_TRUST_PROXY];
   if (v === 'true') return true;
   if (v === 'false') return false;
   if (/^\d+$/.test(v)) return Number(v);

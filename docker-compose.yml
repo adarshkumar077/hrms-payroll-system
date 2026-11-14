@@ -70,6 +70,8 @@ services:
       API_PREFIX: api/v1
       CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS to your HTTPS origin in .env.production}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
+      INTEGRATION_SECRET_KEY: ${INTEGRATION_SECRET_KEY:?Set INTEGRATION_SECRET_KEY in .env.production (to keep existing encrypted integration secrets readable, use your current JWT_ACCESS_SECRET value)}
+      TRUST_PROXY: ${TRUST_PROXY:-}
       LOCAL_STORAGE_DIR: /app/apps/api/uploads
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_LOGIN_ID: ${BOOTSTRAP_ADMIN_LOGIN_ID:-}
