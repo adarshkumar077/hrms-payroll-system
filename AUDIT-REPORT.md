@@ -185,4 +185,5 @@ Minimum server: **4 GB RAM, 2 vCPU, 40 GB SSD** (more if selfies stay in the DB)
 | A1 | IP allowlist trusted the client-supplied `X-Forwarded-For` header, so anyone could bypass it | Fixed in T3 |
 | A2 | Default minimum password length was 5 characters | Raised to 8 for new passwords (login still accepts existing shorter passwords). Existing databases keep their stored `security.password_min_length`; raise it in Security Settings |
 | A3 | `forcePasswordChange` was only enforced by a web redirect, not by the API | Fixed in T12 / T12b |
+| A5 | Payroll generation never paid the configured monthly gross to employees with a salary config (preview showed full salary; payslip ~₹0). LOP ignored employees without a Basic allowance | Fixed after T9: gross is a SALARY earning; LOP falls back to it. **HR must confirm gross excludes the allowances entered beside it** |
 | A4 | Pre-existing schema drift: `import_jobs.error_report` naming, missing unique index on `roles(company_id, code)` | Scheduled in T14 |
