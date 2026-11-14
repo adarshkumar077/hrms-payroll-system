@@ -377,7 +377,7 @@ export default function SecuritySettingsPage() {
                 value={passwordForm.newPassword}
                 onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
                 required
-                minLength={5}
+                minLength={8}
               />
             </label>
             <label className="block">
@@ -388,7 +388,7 @@ export default function SecuritySettingsPage() {
                 value={passwordForm.confirmPassword}
                 onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
                 required
-                minLength={5}
+                minLength={8}
               />
             </label>
             <button

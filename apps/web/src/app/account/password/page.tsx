@@ -83,7 +83,7 @@ function ChangePasswordForm() {
             value={form.newPassword}
             onChange={(e) => setForm({ ...form, newPassword: e.target.value })}
             required
-            minLength={5}
+            minLength={8}
           />
         </label>
         <label className="block text-sm">
@@ -94,7 +94,7 @@ function ChangePasswordForm() {
             value={form.confirmPassword}
             onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
             required
-            minLength={5}
+            minLength={8}
           />
         </label>
         <div className="flex gap-2 justify-end pt-2">

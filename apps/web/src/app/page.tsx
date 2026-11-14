@@ -287,7 +287,7 @@ export default function LoginPage() {
                   onChange={(e) => setSetupPassword(e.target.value)}
                   type="password"
                   required
-                  minLength={5}
+                  minLength={8}
                 />
               </label>
               <label className="block">
@@ -298,7 +298,7 @@ export default function LoginPage() {
                   onChange={(e) => setSetupConfirmPassword(e.target.value)}
                   type="password"
                   required
-                  minLength={5}
+                  minLength={8}
                 />
               </label>
               {error && <p className="text-sm text-danger bg-danger-light/50 rounded-xl px-3 py-2">{error}</p>}

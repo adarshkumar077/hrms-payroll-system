@@ -425,7 +425,7 @@ export class AiService {
       ].join('\n\n');
     }
     if (/password|2fa|login|security/.test(q)) {
-      return `Password min length is ${map['security.password_min_length'] ?? 5}. Use Security Settings (Super Admin/HR) for 2FA enforcement and IP allow-list.`;
+      return `Password min length is ${map['security.password_min_length'] ?? 8}. Use Security Settings (Super Admin/HR) for 2FA enforcement and IP allow-list.`;
     }
     if (/resign|exit|fnf|reliev/.test(q)) {
       return 'Resignations are submitted from Exit. Clearance and F&F are managed by HR. Experience/relieving letters generate after F&F finalize.';

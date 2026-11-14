@@ -94,12 +94,12 @@ export class ChangePasswordDto {
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   newPassword!: string;
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   confirmPassword!: string;
 }
 
@@ -132,12 +132,12 @@ export class SetupSuperAdminDto {
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   password!: string;
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   confirmPassword!: string;
 
   @ApiPropertyOptional()
@@ -163,12 +163,12 @@ export class CreateAdminUserDto {
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   password!: string;
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   confirmPassword!: string;
 
   @ApiProperty({ enum: ['HR'] })

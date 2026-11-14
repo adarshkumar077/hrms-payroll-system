@@ -49,7 +49,7 @@ export const DEFAULT_COMPANY_SETTINGS: SettingDef[] = [
   { key: 'security.max_failed_logins', label: 'Max failed login attempts', group: 'security', value: 5 },
   { key: 'security.lockout_minutes', label: 'Account lockout (minutes)', group: 'security', value: 30 },
   { key: 'security.session_timeout_minutes', label: 'Session timeout (minutes)', group: 'security', value: 480 },
-  { key: 'security.password_min_length', label: 'Password min length', group: 'security', value: 5 },
+  { key: 'security.password_min_length', label: 'Password min length', group: 'security', value: 8 },
   { key: 'security.password_require_upper', label: 'Password requires uppercase', group: 'security', value: false },
   { key: 'security.password_require_number', label: 'Password requires number', group: 'security', value: false },
   { key: 'security.password_require_special', label: 'Password requires special char', group: 'security', value: false },

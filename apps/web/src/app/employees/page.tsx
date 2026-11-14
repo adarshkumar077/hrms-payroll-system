@@ -189,8 +189,8 @@ export default function EmployeesPage() {
       setError('Username must be at least 5 characters.');
       return;
     }
-    if (form.password.length < 5) {
-      setError('Password must be at least 5 characters.');
+    if (form.password.length < 8) {
+      setError('Password must be at least 8 characters.');
       return;
     }
     if (form.password !== form.confirmPassword) {
