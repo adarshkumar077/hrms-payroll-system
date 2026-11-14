@@ -363,7 +363,11 @@ export class AuthService {
     totpCode?: string,
   ) {
     if (!user.totpEnabled || !user.totpSecret) return;
-    if (!totpCode || !(await this.checkTotp(totpCode, user.totpSecret))) {
+    if (!totpCode) throw new UnauthorizedException('Invalid 2FA code');
+    if (!(await this.checkTotp(totpCode, user.totpSecret))) {
+      // A wrong code counts like a wrong password, so codes cannot be brute-forced once the
+      // password is known. A missing code does not count (clients probe for the 2FA step).
+      await this.registerFailedLogin(user);
       throw new UnauthorizedException('Invalid 2FA code');
     }
   }

@@ -114,7 +114,6 @@ describe('employee payroll scope / IDOR', { skip: SKIP_NO_DB }, () => {
 
   test(
     'an EMPLOYEE payroll history only lists APPROVED/LOCKED payroll (same rule as payslips)',
-    { todo: 'bug: employee-payroll.service.ts payrollHistory (line ~222) has no payrollRun.status filter, so an employee can see their DRAFT/REVIEW payroll lines before HR approves the run' },
     async () => {
       const hr = authUser(companyId, ['HR'], null);
       await payroll.generate(hr, { year: 2027, month: 7 } as any); // left in REVIEW

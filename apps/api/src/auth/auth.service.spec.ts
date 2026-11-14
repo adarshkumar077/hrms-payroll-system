@@ -273,7 +273,6 @@ describe('AuthService.loginPassword', () => {
 
     test(
       'repeated wrong TOTP codes count towards lockout',
-      { todo: 'bug: auth.service.ts verifyTotpIfNeeded (line ~361) never calls registerFailedLogin, so a correct password + wrong 2FA code can be retried without lockout (only the route throttle limits it)' },
       async () => {
         const secret = generateSecret();
         h = makeHarness({ 'security.max_failed_logins': 3 });

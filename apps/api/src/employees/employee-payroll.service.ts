@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Employee, Prisma, RoleCode, TaxRegime } from '@prisma/client';
+import { Employee, PayrollRunStatus, Prisma, RoleCode, TaxRegime } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
 import { PayrollConfigBodyDto } from './dto/payroll-config.dto';
@@ -220,7 +220,12 @@ export class EmployeePayrollService {
     await this.assertEmployee(actor.companyId, employeeId);
 
     const lines = await this.prisma.payrollLine.findMany({
-      where: { companyId: actor.companyId, employeeId },
+      where: {
+        companyId: actor.companyId,
+        employeeId,
+        // Same rule as myPayslips: employees only see payroll once HR has approved the run.
+        ...(privileged ? {} : { payrollRun: { status: { in: [PayrollRunStatus.APPROVED, PayrollRunStatus.LOCKED] } } }),
+      },
       include: { payrollRun: true },
       orderBy: [{ payrollRun: { year: 'desc' } }, { payrollRun: { month: 'desc' } }],
     });

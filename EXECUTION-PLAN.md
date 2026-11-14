@@ -259,5 +259,5 @@ Tasks in the same wave touch different files, so they run in parallel. Each one 
 | T12 Cookie sessions and CSP | Opus | 3 | ✅ merged (verified live) | |
 | T12b Mobile change-password screen (found in T12: forced-change users get 403 on mobile) | Haiku | 3 | ✅ merged (not type-checked: no mobile deps installed) | |
 | T13 Off-site backups | Haiku | 3 | ✅ merged | |
-| T14 Core tests | Sonnet | 3 | 🔄 running | |
+| T14 Core tests | Sonnet | 3 | ✅ merged (187 tests with DB; 2 bugs it found are fixed; drift closed) | |
 | T15–T19 Launch | Owner | 4 | ⏳ | |
