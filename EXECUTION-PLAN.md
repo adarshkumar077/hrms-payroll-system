@@ -251,7 +251,7 @@ Tasks in the same wave touch different files, so they run in parallel. Each one 
 | T5 Docs and junk | Haiku | 1 | ✅ merged (+ LAN-IP cleanup) | |
 | T6 Dependency upgrades | Sonnet | 2 | ✅ merged (audit: 0 prod vulns) | |
 | T7 Money as Decimal | Opus | 2 | 🔄 running | |
-| T8 ESLint and CI | Sonnet | 2 (after T6) | 🔄 running | |
+| T8 ESLint and CI | Sonnet | 2 (after T6) | ✅ merged (0 errors, 48 warnings) | |
 | T9 Statutory engine | Opus | 3 | ⏳ | |
 | T10 Statutory exports | Sonnet | 3 (after T9) | ⏳ | |
 | T11 Object storage | Sonnet | 3 | ⏳ | |
