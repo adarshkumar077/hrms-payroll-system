@@ -257,6 +257,7 @@ Tasks in the same wave touch different files, so they run in parallel. Each one 
 | T10 Statutory exports | Sonnet | 3 (after T9) | ⏳ | |
 | T11 Object storage | Sonnet | 3 | 🔄 running | |
 | T12 Cookie sessions and CSP | Opus | 3 | ✅ merged (verified live) | |
+| T12b Mobile change-password screen (found in T12: forced-change users get 403 on mobile) | Haiku | 3 | ⏳ | |
 | T13 Off-site backups | Haiku | 3 | ✅ merged | |
 | T14 Core tests | Sonnet | 3 | ⏳ | |
 | T15–T19 Launch | Owner | 4 | ⏳ | |
