@@ -28,5 +28,9 @@ data/
 # Real production secrets (local copy only, never commit)
 .env.production
 
+# Local tooling binaries and TLS certs (never commit; see docs/MANUAL-START.md)
+deploy/bin/
+apps/web/certificates/
+
 # Claude Code agent worktrees
 .claude/worktrees/
