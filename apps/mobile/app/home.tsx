@@ -15,7 +15,6 @@ export default function Home() {
   const { token, roles: rolesParam } = useLocalSearchParams<{ token: string; roles?: string }>();
   const roles = (rolesParam ?? '').split(',').filter(Boolean);
   const isPrivileged = roles.some((r) => ['SUPER_ADMIN', 'ADMIN', 'HR'].includes(r));
-  const canCrm = isPrivileged || roles.includes('EMPLOYEE');
   const [company, setCompany] = useState<CompanyDetails | null>(null);
   const [error, setError] = useState('');
 
@@ -55,14 +54,6 @@ export default function Home() {
       <LinkRow label="Notifications" onPress={() => go('/notifications')} />
       <LinkRow label="Self-Service" onPress={() => go('/ess')} />
       <LinkRow label="Profile" onPress={() => go('/profile')} />
-
-      {canCrm && (
-        <>
-          <Text style={styles.section}>CRM</Text>
-          <LinkRow label="My CRM Tasks" onPress={() => go('/crm-tasks')} />
-          {isPrivileged && <LinkRow label="CRM Leads" onPress={() => go('/crm-leads')} />}
-        </>
-      )}
 
       {isPrivileged && (
         <>

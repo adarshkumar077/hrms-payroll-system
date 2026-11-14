@@ -1,4 +1,4 @@
-/** Plan catalogue ported from Orbit CRM (vendor/orbit-crm/lib/billing.ts) — static registry for HRMS UI. */
+/** Plan catalogue ported from a prior CRM product — static registry for HRMS UI. */
 
 export type PlanId = 'free' | 'growth' | 'scale';
 
@@ -19,7 +19,7 @@ export const PLANS: Record<PlanId, Plan> = {
     seats: 5,
     priceMonthly: 0,
     blurb: 'For founders getting started.',
-    features: ['Up to 5 users', 'CRM + HR + Payroll', 'Attendance', 'Reports'],
+    features: ['Up to 5 users', 'HR + Payroll', 'Attendance', 'Reports'],
     limits: { customFieldsPerModule: 5, aiOnboarding: false },
   },
   growth: {
@@ -28,7 +28,7 @@ export const PLANS: Record<PlanId, Plan> = {
     seats: 25,
     priceMonthly: 2499,
     blurb: 'For growing SMB teams.',
-    features: ['Up to 25 users', 'Everything in Free', 'Priority support', 'Advanced CRM'],
+    features: ['Up to 25 users', 'Everything in Free', 'Priority support'],
     limits: { customFieldsPerModule: 25, aiOnboarding: true },
   },
   scale: {

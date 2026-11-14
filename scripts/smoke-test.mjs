@@ -57,8 +57,6 @@ async function main() {
   const routes = [
     ['Dashboard HR', '/dashboard/hr'],
     ['Employees', '/employees?take=10'],
-    ['CRM leads', '/crm/leads'],
-    ['CRM tasks', '/crm/tasks'],
     ['Payroll runs', '/payroll/runs'],
     ['Leave balances', '/me/leave/balances'],
     ['Attendance summary', '/me/attendance/summary'],

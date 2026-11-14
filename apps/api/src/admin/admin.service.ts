@@ -348,32 +348,6 @@ export class AdminService {
       await tx.userModuleAccess.deleteMany({ where: { userId } });
       await tx.userRole.deleteMany({ where: { userId } });
 
-      if (employeeId) {
-        await tx.crmTaskComment.deleteMany({
-          where: { authorEmployeeId: employeeId },
-        });
-        await tx.crmTask.deleteMany({
-          where: {
-            OR: [{ assignedToEmployeeId: employeeId }, { assignedByEmployeeId: employeeId }],
-          },
-        });
-        await tx.crmActivityLog.deleteMany({ where: { actorEmployeeId: employeeId } });
-        await tx.crmNote.deleteMany({ where: { authorEmployeeId: employeeId } });
-        await tx.crmFollowUp.deleteMany({ where: { ownerEmployeeId: employeeId } });
-        await tx.crmLead.updateMany({
-          where: { ownerEmployeeId: employeeId },
-          data: { ownerEmployeeId: null },
-        });
-        await tx.crmDeal.updateMany({
-          where: { ownerEmployeeId: employeeId },
-          data: { ownerEmployeeId: null },
-        });
-        await tx.crmCustomer.updateMany({
-          where: { ownerEmployeeId: employeeId },
-          data: { ownerEmployeeId: null },
-        });
-      }
-
       await tx.user.delete({ where: { id: userId } });
 
       if (employeeId) {

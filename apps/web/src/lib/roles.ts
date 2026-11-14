@@ -31,10 +31,6 @@ export function isOpsAdmin(user: SessionUser | null): boolean {
   return user?.roles.some((r) => r === 'SUPER_ADMIN' || r === 'ADMIN') ?? false;
 }
 
-export function canAccessCrm(user: SessionUser | null): boolean {
-  return isOpsAdmin(user) || isHr(user);
-}
-
 export function isEmployeeUser(user: SessionUser | null): boolean {
   if (!user?.employeeId) return false;
   return user.roles.includes('EMPLOYEE') && !isAdmin(user);

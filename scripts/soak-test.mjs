@@ -35,7 +35,6 @@ async function probe(token) {
     `${base}/api/v1/health`,
     `${base}/api/v1/dashboard/hr`,
     `${base}/api/v1/employees?take=20`,
-    `${base}/api/v1/crm/leads`,
     `${base}/`,
   ];
   for (const url of urls) {
