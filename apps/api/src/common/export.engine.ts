@@ -7,7 +7,7 @@ export type ExportFile = {
 };
 
 function slug(title: string) {
-  return title.replace(/\s+/g, '_').toLowerCase().replace(/[^a-z0-9_\-]/g, '');
+  return title.replace(/\s+/g, '_').toLowerCase().replace(/[^a-z0-9_-]/g, '');
 }
 
 export function rowsToCsv(rows: Record<string, unknown>[]): string {

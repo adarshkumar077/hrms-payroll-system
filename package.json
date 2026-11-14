@@ -37,7 +37,8 @@
     "soak-test": "node scripts/soak-test.mjs",
     "monitor": "node scripts/monitor-health.mjs",
     "security-test": "node scripts/security-pentest.mjs",
-    "lint": "npm run lint -w @eitf/api & npm run lint -w @eitf/web"
+    "lint": "npm run lint -w @eitf/api && npm run lint -w @eitf/web",
+    "test": "npm test -w @eitf/api"
   },
   "engines": {
     "node": ">=20"
