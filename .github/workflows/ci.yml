@@ -7,8 +7,23 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,6 +33,12 @@ jobs:
       - run: npm ci
       - run: npm run db:generate
       - run: npm run lint
+      - name: Apply migrations to the test database
+        run: npx prisma migrate deploy
+        working-directory: apps/api
+      - name: Verify schema.prisma matches the migrations (no drift)
+        run: npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
+        working-directory: apps/api
       - run: npm test
       - run: npm run build:api
       - run: npm run build:web
