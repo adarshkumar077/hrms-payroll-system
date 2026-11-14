@@ -7,15 +7,18 @@ import {
   calcDailySalary,
   calcEmi,
   calcEsdForMonth,
-  calcMandatoryTds,
+  calcEstimatedMonthlyTds,
   calcMonthNetPayable,
   calcPayrollPreview,
   calcPayslipTotals,
   calcProratedAmount,
   calendarDaysInMonth,
   defaultPayrollConfigJson,
+  normalizePayrollConfig,
   type EmployeePayrollConfigJson,
+  type StatutoryContext,
 } from './payroll-calculator';
+import { defaultStatutoryRules } from './statutory';
 
 // Golden values below were computed independently with Python's decimal module
 // (ROUND_HALF_UP, 2dp), not with this code.
@@ -62,15 +65,86 @@ test('daily earnings: half day rounds half-up at .005', () => {
   assert.equal(calcDailyEarning('PH', daily, { holidayPaid: false }).amount, 0);
 });
 
-test('percent deductions: PF 12% and mandatory 1% TDS on an odd gross', () => {
+test('manual overrides still work: PF 12% of gross (percent), fixed TDS / PF', () => {
   const config: EmployeePayrollConfigJson = defaultPayrollConfigJson();
   config.deductions.pf = { enabled: true, mode: 'percent', value: 12 };
   const p = calcPayrollPreview({ grossMonthly: BASIC, config });
   assert.equal(p.pf, 4000); // 3999.9996 → 4000.00
-  assert.equal(p.tds, 333.33); // 333.3333 → 333.33
-  assert.equal(calcMandatoryTds(BASIC), 333.33);
-  assert.equal(calcMandatoryTds(-500), 0);
-  assert.equal(calcMandatoryTds(100.5), 1.01); // 1.005 → 1.01 (half-up)
+  assert.equal(p.employerPfEps, 0); // employer share is only computed in statutory mode
+  // Statutory TDS: 33,333.33 × 12 = 3,99,999.96 − 75,000 → nil under the new regime
+  assert.equal(p.tds, 0);
+  assert.equal(p.statutory.modes.tds, 'statutory');
+
+  config.deductions.pf = { enabled: true, mode: 'fixed', value: 3600 };
+  config.deductions.tds = { enabled: true, mode: 'fixed', value: 1234.565 };
+  const q = calcPayrollPreview({ grossMonthly: BASIC, config });
+  assert.equal(q.pf, 3600);
+  assert.equal(q.tds, 1234.57); // half-up
+  assert.equal(q.statutory.tds, null);
+});
+
+test('legacy config JSON: flat 1% TDS migrates to the slab engine; fixed PF / PT overrides are kept', () => {
+  const legacy = {
+    allowances: defaultPayrollConfigJson().allowances,
+    deductions: {
+      pf: { enabled: true, mode: 'fixed', value: 3600 },
+      tds: { enabled: true, mode: 'percent', value: 1 },
+      esd: { enabled: false, amount: 500 },
+      professionalTax: { enabled: true, amount: 200 },
+      custom: [],
+    },
+  } as unknown as EmployeePayrollConfigJson;
+  const c = normalizePayrollConfig(legacy);
+  assert.deepEqual(c.deductions.pf, { enabled: true, mode: 'fixed', value: 3600 });
+  assert.deepEqual(c.deductions.tds, { enabled: true, mode: 'statutory' });
+  assert.deepEqual(c.deductions.professionalTax, { enabled: true, amount: 200, mode: 'fixed' });
+  assert.deepEqual(c.deductions.esi, { enabled: false, mode: 'statutory' });
+  const zeroPt = normalizePayrollConfig({
+    ...legacy,
+    deductions: { ...legacy.deductions, professionalTax: { enabled: true, amount: 0 } },
+  });
+  assert.equal(zeroPt.deductions.professionalTax.mode, 'statutory');
+});
+
+test('statutory preview: PF on capped wage, ESI, Maharashtra February PT, employer shares', () => {
+  const config = defaultPayrollConfigJson();
+  config.deductions.pf = { enabled: true, mode: 'statutory' };
+  config.deductions.esi = { enabled: true, mode: 'statutory' };
+  const ctx: StatutoryContext = {
+    rules: defaultStatutoryRules('2026-27'),
+    year: 2027,
+    month: 2,
+    taxRegime: 'NEW',
+    ptState: 'MH',
+  };
+  const p = calcPayrollPreview({ grossMonthly: 18000, config, statutory: ctx });
+  assert.equal(p.pf, 1800); // 12% of min(18,000, 15,000)
+  assert.equal(p.employerPfEps, 1250);
+  assert.equal(p.employerPfEpf, 550);
+  assert.equal(p.esi, 135); // 0.75% of 18,000
+  assert.equal(p.employerEsi, 585); // 3.25%
+  assert.equal(p.professionalTax, 300); // February
+  assert.equal(p.tds, 0);
+  assert.equal(p.totalDeductions, 2235);
+  assert.equal(p.netSalary, 15765);
+  assert.equal(p.statutory.verifyWithCA, true);
+});
+
+test('statutory preview: steady-state TDS new vs old regime at ₹1.5L/month', () => {
+  const config = defaultPayrollConfigJson();
+  const base: StatutoryContext = { rules: defaultStatutoryRules('2026-27'), year: 2026, month: 4, ptState: 'MH' };
+  // 18,00,000 − 75,000 = 17,25,000 → 1,45,000 + 5,800 cess = 1,50,800 ÷ 12 = 12,566.67 → 12,567
+  assert.equal(calcPayrollPreview({ grossMonthly: 150000, config, statutory: { ...base, taxRegime: 'NEW' } }).tds, 12567);
+  // 18,00,000 − 50,000 − 1,50,000 − 2,400 PT = 15,97,600 → 2,91,780 + 11,671.20 = 3,03,451.20 ÷ 12 → 25,288
+  assert.equal(
+    calcPayrollPreview({
+      grossMonthly: 150000,
+      config,
+      statutory: { ...base, taxRegime: 'OLD', declaredDeductions: 150000 },
+    }).tds,
+    25288,
+  );
+  assert.equal(calcEstimatedMonthlyTds(150000, { ...base, taxRegime: 'NEW' }), 12567);
 });
 
 test('payroll preview: gross + allowances − deductions = net exactly', () => {
@@ -96,12 +170,13 @@ test('payroll preview: gross + allowances − deductions = net exactly', () => {
   assert.equal(p.esdDeductedToDate, 1000);
   assert.equal(p.professionalTax, 200);
 
-  const expectedDed = M.add(p.pf, p.tds, p.esd, p.professionalTax, p.otherDeductions);
+  const expectedDed = M.add(p.pf, p.esi, p.tds, p.esd, p.professionalTax, p.otherDeductions);
   assert.ok(M.money(p.totalDeductions).equals(expectedDed));
-  assert.equal(p.totalDeductions, 5033.63); // 4000 + 333.33 + 500 + 200 + 0.30
+  assert.equal(p.tds, 0); // 34,568.30 × 12 − 75,000 is under the ₹12L rebate limit
+  assert.equal(p.totalDeductions, 4700.3); // 4000 + 0 + 500 + 200 + 0.30
   const expectedNet = M.sub(M.add(p.grossSalary, p.totalAllowances), p.totalDeductions);
   assert.ok(M.money(p.netSalary).equals(expectedNet));
-  assert.equal(p.netSalary, 29534.67); // 33333.33 + 1234.97 − 5033.63
+  assert.equal(p.netSalary, 29868); // 33333.33 + 1234.97 − 4700.30
 });
 
 test('payroll preview: deductions are capped at gross and net never goes negative', () => {
@@ -155,7 +230,7 @@ test('payslip totals with LOP, loan EMI and reimbursements: gross − deductions
   const emis = [3333.33, 1250.005]; // two active loans; second rounds to 1250.01
   const deductions = [
     { code: 'LOP', amount: calcProratedAmount(BASIC, 2.5, days) },
-    { code: 'TDS', amount: calcMandatoryTds(BASIC) },
+    { code: 'TDS', amount: 333.33 },
     { code: 'LOAN_EMI', amount: M.toNumber(M.sumBy(emis, (e) => M.round2(e))) },
   ];
   const t = calcPayslipTotals(earnings, deductions);
@@ -177,7 +252,7 @@ test('month net payable (attendance settlement) is exact', () => {
     lateConversionDeduction: 0,
     pf: 1800,
     esd: 500,
-    tds: calcMandatoryTds(BASIC),
+    tds: 333.33,
     otherDeductions: 0.1,
   });
   // 33333.33 − 2222.22 − 555.56 − 1800 − 500 − 333.33 − 0.10

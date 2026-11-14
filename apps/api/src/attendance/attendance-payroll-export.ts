@@ -285,7 +285,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
     const start = addTitleBlock(sh, {
       companyName: input.companyName,
       title: 'MONTHLY ATTENDANCE & PAYROLL SUMMARY',
-      subtitle: `Period: ${period} · Calendar days: ${input.calendarDays} · Per-day = Gross ÷ ${input.calendarDays} · Late: ${input.lateToHalf}=1 HD · TDS 1% mandatory`,
+      subtitle: `Period: ${period} · Calendar days: ${input.calendarDays} · Per-day = Gross ÷ ${input.calendarDays} · Late: ${input.lateToHalf}=1 HD · TDS estimated from income-tax slabs (new regime)`,
       generatedAt: input.generatedAt,
     });
 
@@ -319,7 +319,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
       ['Total Gross Salary', fmtInr(totals.gross)],
       ['Total PF Deductions', fmtInr(totals.pf)],
       ['Total Security Deposit', fmtInr(totals.esd)],
-      ['Total TDS (1%)', fmtInr(totals.tds)],
+      ['Total TDS', fmtInr(totals.tds)],
       ['Total All Deductions', fmtInr(totals.deduct)],
       ['Total Final Net Payable', fmtInr(totals.net)],
     ];
@@ -370,7 +370,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
       'Late Mark Half-Day Deduction',
       'PF Deduction',
       'Security Deposit Deduction',
-      'TDS (1%)',
+      'TDS',
       'Other Deductions',
       'Total Deductions',
       'Final Net Payable Salary',
@@ -463,7 +463,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
         ['Late Mark Half-Day Deduction', fmtInr(agg.lateConversionDeduction)],
         ['PF Deduction', fmtInr(meta.pf)],
         ['Security Deposit Deduction', fmtInr(meta.esd)],
-        ['TDS (1%)', fmtInr(meta.tds)],
+        ['TDS', fmtInr(meta.tds)],
         ['Other Deductions', fmtInr(meta.otherDeductions)],
         ['Total Deductions', totalDeductions],
         ['FINAL NET PAYABLE', finalNet],
@@ -600,7 +600,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
       'Late Mark Half-Day Deduction',
       'PF Deduction',
       'Security Deposit',
-      'TDS (1%)',
+      'TDS',
       'Other Deductions',
       'Total Deductions',
       'Final Net Payable',
@@ -699,16 +699,16 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
     setupPrint(sh, input.companyName, 'TDS Report');
     const start = addTitleBlock(sh, {
       companyName: input.companyName,
-      title: 'TDS REPORT (1% MANDATORY)',
-      subtitle: `Period: ${period} · TDS = Applicable Monthly Gross × 1% · Applied to every employee once`,
+      title: 'TDS REPORT (ESTIMATE — VERIFY WITH CA)',
+      subtitle: `Period: ${period} · TDS = projected annual income-tax (slabs, rebate, cess) ÷ 12 · Payroll run recalculates with year-to-date figures`,
       generatedAt: input.generatedAt,
     });
     const headers = [
       'Employee ID',
       'Employee Name',
       'Applicable Monthly Salary (Gross)',
-      'TDS Rate',
-      'TDS Amount (1%)',
+      'TDS Basis',
+      'TDS Amount',
     ];
     headers.forEach((h, i) => {
       sh.getCell(start, i + 1).value = h;
@@ -720,7 +720,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
       writeRow(
         sh,
         start + 1 + idx,
-        [meta.employeeCode, meta.employeeName, fmtInr(meta.grossMonthly), '1%', fmtInr(meta.tds)],
+        [meta.employeeCode, meta.employeeName, fmtInr(meta.grossMonthly), 'Income-tax slabs', fmtInr(meta.tds)],
         { alt: idx % 2 === 1, moneyCols: [3, 5] },
       );
     });

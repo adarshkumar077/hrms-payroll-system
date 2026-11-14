@@ -77,7 +77,12 @@ export default function PayrollPage() {
         ← Dashboard
       </Link>
       <h1 className="font-display text-3xl text-brand-700 mt-2">Payroll</h1>
-      <p className="text-sm text-ink/60 mb-4">Generate draft → review → approve & lock</p>
+      <p className="text-sm text-ink/60 mb-4">
+        Generate draft → review → approve & lock ·{' '}
+        <Link href="/payroll/statutory" className="text-brand-600 hover:underline">
+          Statutory rules (TDS / PF / ESI / PT)
+        </Link>
+      </p>
 
       {anomalies && (
         <section className="mb-6 p-4 border border-amber-200 bg-amber-50/60 rounded-lg text-sm">

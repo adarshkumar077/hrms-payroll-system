@@ -107,6 +107,7 @@ model Company {
   loginLogs             LoginLog[]
   userDevices           UserDevice[]
   loginSessions         LoginSession[]
+  statutoryRuleSets     StatutoryRuleSet[]
 
   @@map("companies")
 }
@@ -309,6 +310,11 @@ enum DocumentTypeCode {
   CUSTOM
 }
 
+enum TaxRegime {
+  NEW
+  OLD
+}
+
 model Employee {
   id             String           @id @default(cuid())
   companyId      String           @map("company_id")
@@ -335,6 +341,12 @@ model Employee {
   department     String?
   designation    String?
   reportingToId  String?          @map("reporting_to_id")
+  /// Income-tax regime chosen by the employee for TDS (default NEW).
+  taxRegime      TaxRegime        @default(NEW) @map("tax_regime")
+  /// Old regime only: declared annual Chapter VI-A deductions (80C, 80D, …) as one total.
+  oldRegimeDeclaredDeductions Decimal? @map("old_regime_declared_deductions") @db.Decimal(14, 2)
+  /// Professional-tax state code (MH, KA, WB, TN, TS, AP, GJ, NONE). Null = NONE.
+  ptState        String?          @map("pt_state")
   createdAt      DateTime         @default(now()) @map("created_at")
   updatedAt      DateTime         @updatedAt @map("updated_at")
 
@@ -1190,6 +1202,14 @@ model PayrollLine {
   paidAt        DateTime? @map("paid_at")
   paidAmount    Decimal?    @map("paid_amount") @db.Decimal(14, 2)
   paidBy        String?   @map("paid_by")
+  /// Employer PF pension (EPS) contribution — not deducted from the employee.
+  employerPfEps Decimal  @default(0) @map("employer_pf_eps") @db.Decimal(14, 2)
+  /// Employer PF (EPF) contribution — not deducted from the employee.
+  employerPfEpf Decimal  @default(0) @map("employer_pf_epf") @db.Decimal(14, 2)
+  /// Employer ESI contribution — not deducted from the employee.
+  employerEsi   Decimal  @default(0) @map("employer_esi") @db.Decimal(14, 2)
+  /// Statutory calculation breakdown (taxable gross, regime, TDS projection, PF wage, ESI basis).
+  statutoryJson Json?    @map("statutory_json")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -1199,6 +1219,27 @@ model PayrollLine {
   @@unique([payrollRunId, employeeId])
   @@index([companyId, employeeId])
   @@map("payroll_lines")
+}
+
+/// Statutory payroll rule tables (income-tax slabs, PF, ESI, PT) per company per financial year.
+/// `rules` is validated by apps/api/src/payroll/statutory/types.ts (parseStatutoryRules).
+/// Defaults are seeded with verifyWithCA = true — VERIFY WITH CA BEFORE GO-LIVE.
+model StatutoryRuleSet {
+  id            String   @id @default(cuid())
+  companyId     String   @map("company_id")
+  /// Indian financial year, e.g. "2026-27" (April 2026 – March 2027).
+  financialYear String   @map("financial_year")
+  rules         Json
+  verifyWithCA  Boolean  @default(true) @map("verify_with_ca")
+  isActive      Boolean  @default(true) @map("is_active")
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, financialYear])
+  @@map("statutory_rule_sets")
 }
 
 model EsdLedgerEntry {

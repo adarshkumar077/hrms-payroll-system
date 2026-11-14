@@ -11,10 +11,11 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PT_STATE_CODES } from '../../payroll/statutory/defaults';
 
 export class ToggleDeductionDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
-  @IsOptional() @IsIn(['percent', 'fixed']) mode?: 'percent' | 'fixed';
+  @IsOptional() @IsIn(['percent', 'fixed', 'statutory']) mode?: 'percent' | 'fixed' | 'statutory';
   @IsOptional() @IsNumber() value?: number;
   @IsOptional() @IsNumber() amount?: number;
 }
@@ -56,6 +57,7 @@ export class AllowancesDto {
 export class DeductionsDto {
   @IsOptional() @ValidateNested() @Type(() => ToggleDeductionDto) pf?: ToggleDeductionDto;
   @IsOptional() @ValidateNested() @Type(() => ToggleDeductionDto) tds?: ToggleDeductionDto;
+  @IsOptional() @ValidateNested() @Type(() => ToggleDeductionDto) esi?: ToggleDeductionDto;
   @IsOptional() @ValidateNested() @Type(() => EsdDeductionDto) esd?: EsdDeductionDto;
   @IsOptional() @ValidateNested() @Type(() => ToggleDeductionDto) professionalTax?: ToggleDeductionDto;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => CustomDeductionDto)
@@ -71,4 +73,10 @@ export class PayrollConfigBodyDto {
   @IsOptional() @IsNumber() @Min(1) workingDays?: number;
   @IsObject() @ValidateNested() @Type(() => AllowancesDto) allowances!: AllowancesDto;
   @IsObject() @ValidateNested() @Type(() => DeductionsDto) deductions!: DeductionsDto;
+  /** Stored on the employee: income-tax regime for TDS. */
+  @IsOptional() @IsIn(['NEW', 'OLD']) taxRegime?: 'NEW' | 'OLD';
+  /** Stored on the employee: old-regime declared annual deductions (80C etc.) total. */
+  @IsOptional() @IsNumber() @Min(0) oldRegimeDeclaredDeductions?: number;
+  /** Stored on the employee: professional-tax state code (MH, KA, WB, TN, TS, AP, GJ, NONE). */
+  @IsOptional() @IsIn([...PT_STATE_CODES]) ptState?: string;
 }

@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, RoleCode } from '@prisma/client';
+import { Employee, Prisma, RoleCode, TaxRegime } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
 import { PayrollConfigBodyDto } from './dto/payroll-config.dto';
@@ -11,15 +11,64 @@ import {
   defaultPayrollConfigJson,
   EmployeePayrollConfigJson,
   normalizePayrollConfig,
-  TDS_PERCENT,
+  StatutoryContext,
 } from '../payroll/payroll-calculator';
+import { financialYearOf } from '../payroll/statutory';
+import { StatutoryRulesService } from '../payroll/statutory/statutory-rules.service';
 import * as M from '../common/money';
 
 const roundMoney = M.toNumber;
 
+type EmployeeTaxFields = Pick<Employee, 'taxRegime' | 'oldRegimeDeclaredDeductions' | 'ptState' | 'gender'>;
+
 @Injectable()
 export class EmployeePayrollService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly statutoryRules: StatutoryRulesService,
+  ) {}
+
+  /**
+   * Steady-state statutory context for previews: current FY rules for the company and the
+   * employee's regime / PT state, treated as a full year (monthly TDS = annual tax ÷ 12).
+   */
+  private async previewContext(
+    companyId: string,
+    emp: EmployeeTaxFields,
+    overrides: Partial<EmployeeTaxFields> = {},
+  ): Promise<StatutoryContext> {
+    const now = new Date();
+    const fy = financialYearOf(now.getFullYear(), now.getMonth() + 1);
+    const { rules } = await this.statutoryRules.getRules(companyId, fy);
+    const merged = { ...emp, ...overrides };
+    return {
+      rules,
+      year: Number(fy.slice(0, 4)),
+      month: 4,
+      taxRegime: merged.taxRegime ?? 'NEW',
+      declaredDeductions: merged.oldRegimeDeclaredDeductions ?? 0,
+      ptState: merged.ptState ?? null,
+      gender: merged.gender ?? null,
+    };
+  }
+
+  private taxFieldsFromDto(dto: PayrollConfigBodyDto): Partial<EmployeeTaxFields> {
+    const out: Partial<EmployeeTaxFields> = {};
+    if (dto.taxRegime) out.taxRegime = dto.taxRegime === 'OLD' ? TaxRegime.OLD : TaxRegime.NEW;
+    if (dto.oldRegimeDeclaredDeductions != null) {
+      out.oldRegimeDeclaredDeductions = M.toDb(dto.oldRegimeDeclaredDeductions);
+    }
+    if (dto.ptState) out.ptState = dto.ptState === 'NONE' ? null : dto.ptState;
+    return out;
+  }
+
+  private taxView(emp: EmployeeTaxFields) {
+    return {
+      taxRegime: emp.taxRegime,
+      oldRegimeDeclaredDeductions: emp.oldRegimeDeclaredDeductions,
+      ptState: emp.ptState ?? 'NONE',
+    };
+  }
 
   private isHrOrCeo(user: AuthUser) {
     return (
@@ -39,6 +88,7 @@ export class EmployeePayrollService {
     const base = defaultPayrollConfigJson();
     const d = dto.deductions;
     const pfEnabled = d.pf?.enabled ?? false;
+    const pfMode = d.pf?.mode ?? 'statutory';
     const esdEnabled = d.esd?.enabled ?? false;
     const esdType = d.esd?.type === 'one_time' || d.esd?.type === 'custom' ? d.esd.type : 'monthly';
     const esdAmount = d.esd?.amount ?? d.esd?.value ?? (esdEnabled ? 500 : base.deductions.esd.amount);
@@ -49,19 +99,21 @@ export class EmployeePayrollService {
         custom: dto.allowances.custom ?? [],
       },
       deductions: {
+        // statutory = engine (12% of Basic+DA capped at the wage ceiling); fixed / percent = manual override.
         pf: {
-          ...base.deductions.pf,
-          ...(d.pf ?? {}),
           enabled: pfEnabled,
-          mode: d.pf?.mode ?? 'fixed',
-          value: d.pf?.value ?? d.pf?.amount ?? (pfEnabled ? 3600 : base.deductions.pf.value),
+          mode: pfMode,
+          value: d.pf?.value ?? d.pf?.amount ?? base.deductions.pf.value,
         },
-        // Mandatory 1% TDS for every employee.
-        tds: {
-          enabled: true,
-          mode: 'percent',
-          value: TDS_PERCENT,
-        },
+        // statutory = income-tax slab engine; fixed = manual monthly TDS.
+        tds:
+          d.tds?.mode === 'fixed'
+            ? { enabled: d.tds.enabled !== false, mode: 'fixed', value: d.tds.value ?? d.tds.amount ?? 0 }
+            : { enabled: d.tds?.enabled !== false, mode: 'statutory' },
+        esi:
+          d.esi?.mode === 'fixed'
+            ? { enabled: !!d.esi.enabled, mode: 'fixed', value: d.esi.value ?? d.esi.amount ?? 0 }
+            : { enabled: !!d.esi?.enabled, mode: 'statutory' },
         esd: {
           enabled: esdEnabled,
           amount: esdAmount,
@@ -70,7 +122,8 @@ export class EmployeePayrollService {
           deductedToDate: Math.max(0, d.esd?.deductedToDate ?? 0),
         },
         professionalTax: {
-          enabled: d.professionalTax?.enabled ?? false,
+          enabled: d.professionalTax?.enabled ?? base.deductions.professionalTax.enabled,
+          mode: d.professionalTax?.mode === 'fixed' ? 'fixed' : 'statutory',
           amount: d.professionalTax?.amount ?? d.professionalTax?.value ?? 0,
         },
         custom: d.custom ?? [],
@@ -83,10 +136,12 @@ export class EmployeePayrollService {
     if (!privileged && actor.employeeId !== employeeId) {
       throw new ForbiddenException();
     }
-    await this.assertEmployee(actor.companyId, employeeId);
+    const emp = await this.assertEmployee(actor.companyId, employeeId);
+    const ctx = await this.previewContext(actor.companyId, emp);
     const row = await this.prisma.employeePayrollConfig.findUnique({ where: { employeeId } });
     if (!row) {
       return {
+        ...this.taxView(emp),
         employeeId,
         grossMonthly: 0,
         dailySalary: null,
@@ -95,20 +150,34 @@ export class EmployeePayrollService {
         effectiveFrom: new Date().toISOString().slice(0, 10),
         workingDays: 30,
         config: defaultPayrollConfigJson(),
-        preview: calcPayrollPreview({ grossMonthly: 0, config: defaultPayrollConfigJson() }),
+        preview: calcPayrollPreview({ grossMonthly: 0, config: defaultPayrollConfigJson(), statutory: ctx }),
       };
     }
     const config = normalizePayrollConfig(row.configJson as EmployeePayrollConfigJson);
     return {
       ...row,
+      ...this.taxView(emp),
       config,
-      preview: calcPayrollPreview({ grossMonthly: row.grossMonthly, config }),
+      preview: calcPayrollPreview({ grossMonthly: row.grossMonthly, config, statutory: ctx }),
     };
+  }
+
+  /** Statutory preview for an unsaved config (same body as PUT); nothing is written. */
+  async previewConfig(actor: AuthUser, employeeId: string, dto: PayrollConfigBodyDto) {
+    if (!this.isHrOrCeo(actor)) throw new ForbiddenException();
+    const emp = await this.assertEmployee(actor.companyId, employeeId);
+    const config = this.mergeConfigJson(dto);
+    const ctx = await this.previewContext(actor.companyId, emp, this.taxFieldsFromDto(dto));
+    return calcPayrollPreview({ grossMonthly: dto.grossMonthly, config, statutory: ctx });
   }
 
   async upsertConfig(actor: AuthUser, employeeId: string, dto: PayrollConfigBodyDto) {
     if (!this.isHrOrCeo(actor)) throw new ForbiddenException();
-    await this.assertEmployee(actor.companyId, employeeId);
+    let emp = await this.assertEmployee(actor.companyId, employeeId);
+    const taxFields = this.taxFieldsFromDto(dto);
+    if (Object.keys(taxFields).length) {
+      emp = await this.prisma.employee.update({ where: { id: employeeId }, data: taxFields });
+    }
 
     // Per-day salary always uses actual calendar days of the effective month (not fixed 30).
     const eff = new Date(dto.effectiveFrom);
@@ -116,7 +185,8 @@ export class EmployeePayrollService {
     const workingDays = dto.workingDays ?? calendarDays;
     const config = this.mergeConfigJson(dto);
     const dailySalary = calcDailySalary(dto.grossMonthly, calendarDays);
-    const preview = calcPayrollPreview({ grossMonthly: dto.grossMonthly, config });
+    const ctx = await this.previewContext(actor.companyId, emp);
+    const preview = calcPayrollPreview({ grossMonthly: dto.grossMonthly, config, statutory: ctx });
 
     const data = {
       companyId: actor.companyId,
@@ -138,6 +208,7 @@ export class EmployeePayrollService {
 
     return {
       ...saved,
+      ...this.taxView(emp),
       config,
       preview,
     };
@@ -165,8 +236,9 @@ export class EmployeePayrollService {
       const tds = deductions.find((d) => d.code === 'TDS')?.amount ?? 0;
       const esd = deductions.find((d) => d.code === 'ESD')?.amount ?? 0;
       const pt = deductions.find((d) => d.code === 'PT')?.amount ?? 0;
+      const esi = deductions.find((d) => d.code === 'ESI')?.amount ?? 0;
       const other = deductions
-        .filter((d) => !['PF', 'TDS', 'ESD', 'PT', 'LOP', 'LOAN_EMI'].includes(d.code))
+        .filter((d) => !['PF', 'TDS', 'ESI', 'ESD', 'PT', 'LOP', 'LOAN_EMI'].includes(d.code))
         .reduce((s, d) => s.plus(M.money(d.amount)), M.money(0));
 
       return {
@@ -182,6 +254,7 @@ export class EmployeePayrollService {
         grossSalary: line.grossEarnings,
         pf,
         tds,
+        esi,
         deposit: esd,
         professionalTax: pt,
         otherDeductions: roundMoney(other),
@@ -196,7 +269,7 @@ export class EmployeePayrollService {
   async salaryTracker(actor: AuthUser, employeeId: string, year?: number, month?: number) {
     const privileged = this.isHrOrCeo(actor) || actor.roles.includes(RoleCode.ADMIN);
     if (!privileged && actor.employeeId !== employeeId) throw new ForbiddenException();
-    await this.assertEmployee(actor.companyId, employeeId);
+    const emp = await this.assertEmployee(actor.companyId, employeeId);
 
     const now = new Date();
     const y = year ?? now.getFullYear();
@@ -247,7 +320,11 @@ export class EmployeePayrollService {
       };
     });
 
-    const preview = calcPayrollPreview({ grossMonthly, config });
+    const preview = calcPayrollPreview({
+      grossMonthly,
+      config,
+      statutory: await this.previewContext(actor.companyId, emp),
+    });
     const attendanceRatio = workingDays > 0 ? presentDays / workingDays : 1;
     // gross × presentDays ÷ workingDays, exact then rounded once.
     const proRatedGross =
