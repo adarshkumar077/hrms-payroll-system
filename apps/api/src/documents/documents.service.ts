@@ -6,7 +6,6 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { AuditAction, DocumentTypeCode, RoleCode } from '@prisma/client';
-import { createReadStream, existsSync } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
@@ -146,10 +145,12 @@ export class DocumentsService {
     return doc;
   }
 
-  private openDocumentStream(storageKey: string) {
-    const abs = this.storage.absolutePath(storageKey);
-    if (!existsSync(abs)) throw new NotFoundException('Document file not found');
-    return createReadStream(abs);
+  private async openDocumentStream(storageKey: string, provider?: string | null) {
+    try {
+      return await this.storage.getStream(storageKey, provider);
+    } catch {
+      throw new NotFoundException('Document file not found');
+    }
   }
 
   async download(actor: AuthUser, documentId: string) {
@@ -162,7 +163,7 @@ export class DocumentsService {
       throw new ForbiddenException();
     }
 
-    const stream = this.openDocumentStream(doc.storageKey);
+    const stream = await this.openDocumentStream(doc.storageKey, doc.storageProvider);
     return {
       file: new StreamableFile(stream),
       fileName: doc.fileName,
@@ -177,7 +178,7 @@ export class DocumentsService {
     });
     if (!doc) throw new NotFoundException('Document not found');
 
-    this.storage.deleteLocal(doc.storageKey);
+    await this.storage.delete(doc.storageKey, doc.storageProvider);
     await this.prisma.employeeDocument.delete({ where: { id: documentId } });
 
     await this.audit.log({
@@ -229,7 +230,7 @@ export class DocumentsService {
       include: { documentType: true },
     });
 
-    this.storage.deleteLocal(oldKey);
+    await this.storage.delete(oldKey, doc.storageProvider);
 
     await this.audit.log({
       companyId: actor.companyId,
@@ -253,7 +254,7 @@ export class DocumentsService {
       throw new ForbiddenException();
     }
 
-    const stream = this.openDocumentStream(doc.storageKey);
+    const stream = await this.openDocumentStream(doc.storageKey, doc.storageProvider);
     return {
       file: new StreamableFile(stream),
       fileName: doc.fileName,

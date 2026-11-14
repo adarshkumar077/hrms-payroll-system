@@ -7,7 +7,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { timingSafeEqual } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import {
   AttendanceDayStatus,
   AttendanceMethod,
@@ -17,6 +17,16 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { StorageService } from '../documents/storage.service';
+import {
+  SELFIE_URL_TTL_SECONDS,
+  buildSelfieKey,
+  decodeSelfieDataUrl,
+  isDataImageUrl,
+  isStorageRef,
+  mapSelfieUrls,
+  SELFIE_KEY_PREFIX,
+} from './selfie-storage';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
 import {
   BiometricWebhookDto,
@@ -103,7 +113,41 @@ export class AttendanceService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly storage: StorageService,
   ) {}
+
+  /**
+   * Turn an incoming selfie value into what the DB stores. Base64 data URLs are validated and
+   * uploaded (-> `storage:<key>`); client-supplied `storage:` refs are rejected so a caller can't
+   * point a record at another tenant's object.
+   */
+  private async ingestSelfie(opts: {
+    companyId: string;
+    recordId: string;
+    punchType: 'IN' | 'OUT';
+    at: Date;
+    value: string | null | undefined;
+  }): Promise<string | undefined> {
+    const v = opts.value;
+    if (v == null) return undefined;
+    if (isStorageRef(v)) throw new BadRequestException('Invalid selfie value');
+    if (!isDataImageUrl(v)) return v;
+    const { buffer, mime } = decodeSelfieDataUrl(v);
+    const key = buildSelfieKey({
+      companyId: opts.companyId,
+      recordId: opts.recordId,
+      punchType: opts.punchType,
+      at: opts.at,
+      mime,
+    });
+    await this.storage.put(key, buffer, mime);
+    return `${SELFIE_KEY_PREFIX}${key}`;
+  }
+
+  /** Map stored `storage:` selfie keys to short-lived signed URLs (call AFTER privacy sanitizing). */
+  private withSignedSelfies<T>(record: T): Promise<T> {
+    return mapSelfieUrls(record, (key) => this.storage.signedUrl(key, SELFIE_URL_TTL_SECONDS));
+  }
 
   async onModuleInit() {
     try {
@@ -261,7 +305,7 @@ export class AttendanceService implements OnModuleInit {
     return {
       ...result,
       // Own punch: include saved GPS so the client can confirm location was stored
-      record: sanitizeAttendanceRecord(result.record, true),
+      record: await this.withSignedSelfies(sanitizeAttendanceRecord(result.record, true)),
     };
   }
 
@@ -394,6 +438,17 @@ export class AttendanceService implements OnModuleInit {
         ? (opts?.checkOutSource ??
           (opts?.skipEnterprise ? undefined : CHECK_OUT_SOURCE.MANUAL_OUT))
         : undefined;
+
+    if (dto.selfieUrl != null) {
+      const stored = await this.ingestSelfie({
+        companyId,
+        recordId: record?.id ?? randomUUID(),
+        punchType,
+        at: punchedAt,
+        value: dto.selfieUrl,
+      });
+      dto = { ...dto, selfieUrl: stored };
+    }
 
     const workStart = await this.setting<string>(companyId, 'office.work_start', '10:15');
     const grace = await this.setting<number>(companyId, 'office.grace_minutes', 0);
@@ -1581,7 +1636,9 @@ export class AttendanceService implements OnModuleInit {
       },
     });
 
-    const safeRecord = record ? sanitizeAttendanceRecord(record, showGeo) : null;
+    const safeRecord = record
+      ? await this.withSignedSelfies(sanitizeAttendanceRecord(record, showGeo))
+      : null;
     const outLabel = checkOutSourceLabel(record?.checkOutSource);
 
     return {
@@ -1687,8 +1744,24 @@ export class AttendanceService implements OnModuleInit {
     if (dto.checkOutAddress != null) extra.checkOutAddress = dto.checkOutAddress;
     if (dto.checkInMapsUrl != null) extra.checkInMapsUrl = dto.checkInMapsUrl;
     if (dto.checkOutMapsUrl != null) extra.checkOutMapsUrl = dto.checkOutMapsUrl;
-    if (dto.checkInSelfieUrl != null) extra.checkInSelfieUrl = dto.checkInSelfieUrl;
-    if (dto.checkOutSelfieUrl != null) extra.checkOutSelfieUrl = dto.checkOutSelfieUrl;
+    if (dto.checkInSelfieUrl != null) {
+      extra.checkInSelfieUrl = await this.ingestSelfie({
+        companyId: user.companyId,
+        recordId: existing?.id ?? randomUUID(),
+        punchType: 'IN',
+        at: day,
+        value: dto.checkInSelfieUrl,
+      });
+    }
+    if (dto.checkOutSelfieUrl != null) {
+      extra.checkOutSelfieUrl = await this.ingestSelfie({
+        companyId: user.companyId,
+        recordId: existing?.id ?? randomUUID(),
+        punchType: 'OUT',
+        at: day,
+        value: dto.checkOutSelfieUrl,
+      });
+    }
     if (dto.checkOutAt) extra.checkOutSource = CHECK_OUT_SOURCE.HR_MANUAL;
     if (dto.method != null) extra.method = dto.method;
     if (dto.checkInAt) extra.checkInAt = new Date(dto.checkInAt);
@@ -1767,7 +1840,7 @@ export class AttendanceService implements OnModuleInit {
       day.getUTCMonth() + 1,
     );
     const refreshed = await this.prisma.attendanceRecord.findUnique({ where: { id: record.id } });
-    return sanitizeAttendanceRecord(refreshed ?? record, true);
+    return this.withSignedSelfies(sanitizeAttendanceRecord(refreshed ?? record, true));
   }
 
   async counters(companyId: string) {
@@ -1840,10 +1913,14 @@ export class AttendanceService implements OnModuleInit {
     });
     const map = new Map(records.map((r) => [r.employeeId, r]));
     const privileged = this.isHr(user);
-    return team.map((t) => ({
-      employee: t,
-      record: map.get(t.id) ? sanitizeAttendanceRecord(map.get(t.id)!, privileged) : null,
-    }));
+    return Promise.all(
+      team.map(async (t) => ({
+        employee: t,
+        record: map.get(t.id)
+          ? await this.withSignedSelfies(sanitizeAttendanceRecord(map.get(t.id)!, privileged))
+          : null,
+      })),
+    );
   }
 
   /**

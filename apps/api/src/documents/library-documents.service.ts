@@ -125,7 +125,10 @@ export class LibraryDocumentsService {
 
   async download(user: AuthUser, id: string) {
     const doc = await this.get(user, id);
-    const stream = this.storage.openReadStream(doc.storageKey);
+    // No provider column on library docs: active driver first, then legacy local disk.
+    const stream = await this.storage
+      .getStream(doc.storageKey)
+      .catch(() => this.storage.getStream(doc.storageKey, 'local'));
     return { file: new StreamableFile(stream), fileName: doc.fileName, mimeType: doc.mimeType };
   }
 
