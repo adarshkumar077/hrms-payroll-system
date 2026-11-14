@@ -12,7 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import { AuditAction, RoleCode, User, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomInt } from 'crypto';
-import { authenticator } from 'otplib';
+import { generateSecret, generateURI, verify as verifyTotp } from 'otplib';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -348,12 +348,21 @@ export class AuthService {
     await this.prisma.user.update({ where: { id: user.id }, data });
   }
 
+  private async checkTotp(token: string, secret: string): Promise<boolean> {
+    try {
+      const result = await verifyTotp({ secret, token, epochTolerance: 0 });
+      return result.valid;
+    } catch {
+      return false;
+    }
+  }
+
   private async verifyTotpIfNeeded(
     user: User & { totpEnabled: boolean; totpSecret: string | null },
     totpCode?: string,
   ) {
     if (!user.totpEnabled || !user.totpSecret) return;
-    if (!totpCode || !authenticator.check(totpCode, user.totpSecret)) {
+    if (!totpCode || !(await this.checkTotp(totpCode, user.totpSecret))) {
       throw new UnauthorizedException('Invalid 2FA code');
     }
   }
@@ -536,19 +545,19 @@ export class AuthService {
 
   async setup2faStart(userId: string, companyId: string) {
     const user = await this.prisma.user.findFirstOrThrow({ where: { id: userId, companyId } });
-    const secret = authenticator.generateSecret();
+    const secret = generateSecret();
     await this.prisma.user.update({
       where: { id: user.id },
       data: { totpSecret: secret, totpEnabled: false },
     });
-    const otpauth = authenticator.keyuri(user.email ?? user.mobile ?? user.id, 'EITF HRMS', secret);
+    const otpauth = generateURI({ issuer: 'EITF HRMS', label: user.email ?? user.mobile ?? user.id, secret });
     const qrDataUrl = await QRCode.toDataURL(otpauth);
     return { secret, otpauth, qrDataUrl };
   }
 
   async setup2faConfirm(userId: string, companyId: string, totpCode: string) {
     const user = await this.prisma.user.findFirstOrThrow({ where: { id: userId, companyId } });
-    if (!user.totpSecret || !authenticator.check(totpCode, user.totpSecret)) {
+    if (!user.totpSecret || !(await this.checkTotp(totpCode, user.totpSecret))) {
       throw new BadRequestException('Invalid TOTP code');
     }
     await this.prisma.user.update({
