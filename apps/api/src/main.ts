@@ -5,10 +5,14 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
+import { isCorsOriginAllowed, parseTrustProxy } from './common/cors-origin';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   const config = app.get(ConfigService);
+
+  // Required so req.ip reflects the real client behind a reverse proxy (not a spoofable header).
+  app.getHttpAdapter().getInstance().set('trust proxy', parseTrustProxy(config.get<string>('TRUST_PROXY')));
 
   app.use(
     helmet({
@@ -25,43 +29,11 @@ async function bootstrap() {
 
   const isProd = config.get<string>('NODE_ENV') === 'production';
   const publicUrl = config.get<string>('PUBLIC_APP_URL');
-  let configured = (config.get<string>('CORS_ORIGINS') ?? publicUrl ?? 'http://localhost:3000')
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
-  if (isProd && configured.includes('*')) {
-    configured = configured.filter((o) => o !== '*');
-    if (publicUrl) configured.push(new URL(publicUrl).origin);
-  }
+  const corsOrigins = config.get<string>('CORS_ORIGINS');
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      if (!origin) return callback(null, true);
-      if (configured.includes(origin)) return callback(null, true);
-      if (publicUrl) {
-        try {
-          if (new URL(publicUrl).origin === origin) return callback(null, true);
-        } catch {
-          /* ignore */
-        }
-      }
-      try {
-        const url = new URL(origin);
-        const host = url.hostname;
-        const isLoopback = host === 'localhost' || host === '127.0.0.1';
-        const isQuickTunnel =
-          host.endsWith('.trycloudflare.com') ||
-          host.endsWith('.cfargotunnel.com') ||
-          host.endsWith('.ngrok-free.app') ||
-          host.endsWith('.ngrok.io');
-        if (isLoopback || isQuickTunnel) return callback(null, true);
-        // Always allow private LAN origins so phones on Wi‑Fi can use http://192.168.x.x:3000
-        const isLocalLan =
-          /^192\.168\.\d+\.\d+$/.test(host) ||
-          /^10\.\d+\.\d+\.\d+$/.test(host) ||
-          /^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+$/.test(host);
-        if (isLocalLan) return callback(null, true);
-      } catch {
-        /* ignore */
+      if (isCorsOriginAllowed(origin, { isProd, corsOrigins, publicAppUrl: publicUrl })) {
+        return callback(null, true);
       }
       return callback(new Error(`CORS blocked for origin: ${origin}`), false);
     },
@@ -89,9 +61,8 @@ async function bootstrap() {
   const port = config.get<number>('API_PORT', 3001);
   await app.listen(port, '0.0.0.0');
   console.log(`API listening on http://0.0.0.0:${port}/${prefix}`);
-  console.log(`LAN health: http://192.168.1.69:${port}/${prefix}/health`);
   console.log(`Health: http://127.0.0.1:${port}/${prefix}/health`);
-  console.log(`Swagger at http://localhost:${port}/api/docs`);
+  if (!isProd) console.log(`Swagger at http://localhost:${port}/api/docs`);
 }
 
 process.on('unhandledRejection', (reason) => {

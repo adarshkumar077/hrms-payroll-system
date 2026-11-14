@@ -27,7 +27,7 @@ export class AuthController {
 
   private meta(req: Request) {
     return {
-      ip: (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ?? req.ip,
+      ip: req.ip,
       ua: req.headers['user-agent'],
     };
   }
