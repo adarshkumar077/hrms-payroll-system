@@ -12,6 +12,7 @@ import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { DEFAULT_COMPANY_SETTINGS } from '../company/default-settings';
+import * as M from '../common/money';
 
 const SECURITY_KEYS = DEFAULT_COMPANY_SETTINGS.filter((s) => s.group === 'security').map(
   (s) => s.key,
@@ -444,7 +445,7 @@ export class SecurityService {
 
     type Comp = { code: string; amount: number };
     const pick = (arr: Comp[], codes: string[]) =>
-      arr.filter((c) => codes.includes(c.code.toUpperCase())).reduce((s, c) => s + c.amount, 0);
+      M.toNumber(M.sumBy(arr.filter((c) => codes.includes(c.code.toUpperCase())), (c) => c.amount));
 
     const rows = run.lines.map((l) => {
       const earn = (l.earningsJson as Comp[]) ?? [];
@@ -457,8 +458,8 @@ export class SecurityService {
         uan: l.employee.government?.uan ?? '',
         pan: l.employee.government?.panNumber ?? '',
         esic: l.employee.government?.esicNumber ?? '',
-        gross: l.grossEarnings,
-        net: l.netPay,
+        gross: M.toNumber(l.grossEarnings),
+        net: M.toNumber(l.netPay),
       };
       switch (k) {
         case 'pf':
@@ -485,7 +486,7 @@ export class SecurityService {
             ...base,
             pan: base.pan,
             tds: pick(ded, ['TDS', 'IT', 'INCOME_TAX']),
-            gross: l.grossEarnings,
+            gross: base.gross,
             note: 'Annual Form 16 is aggregated per FY — monthly snapshot',
           };
         case 'form24q':
@@ -500,9 +501,9 @@ export class SecurityService {
             ...base,
             earnings: earn.map((e) => `${e.code}:${e.amount}`).join('|'),
             deductions: ded.map((d) => `${d.code}:${d.amount}`).join('|'),
-            gross: l.grossEarnings,
-            deductionsTotal: l.totalDeductions,
-            net: l.netPay,
+            gross: base.gross,
+            deductionsTotal: M.toNumber(l.totalDeductions),
+            net: base.net,
             lopDays: l.lopDays,
           };
         default:

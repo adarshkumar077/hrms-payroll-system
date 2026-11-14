@@ -721,7 +721,7 @@ model AttendanceRecord {
   checkOutAt      DateTime?           @map("check_out_at")
   workMinutes     Int?                @map("work_minutes")
   overtimeMinutes Int                 @default(0) @map("overtime_minutes")
-  todaysEarnings  Float?              @map("todays_earnings")
+  todaysEarnings  Decimal?              @map("todays_earnings") @db.Decimal(14, 2)
   isLate          Boolean             @default(false) @map("is_late")
   lateMinutes     Int                 @default(0) @map("late_minutes")
   method          AttendanceMethod?
@@ -1073,7 +1073,7 @@ model SalaryTemplateLine {
   id          String @id @default(cuid())
   templateId  String @map("template_id")
   componentId String @map("component_id")
-  amount      Float  @default(0)
+  amount      Decimal  @default(0) @db.Decimal(14, 2)
   formula     String?
   percentOfBasic Float? @map("percent_of_basic")
 
@@ -1089,7 +1089,7 @@ model EmployeeSalaryStructure {
   companyId  String   @map("company_id")
   employeeId String   @map("employee_id")
   effectiveFrom DateTime @map("effective_from") @db.Date
-  ctcAnnual  Float    @map("ctc_annual")
+  ctcAnnual  Decimal    @map("ctc_annual") @db.Decimal(14, 2)
   currency   String   @default("INR")
   isActive   Boolean  @default(true) @map("is_active")
   notes      String?
@@ -1107,7 +1107,7 @@ model EmployeeSalaryLine {
   id          String @id @default(cuid())
   structureId String @map("structure_id")
   componentId String @map("component_id")
-  amount      Float
+  amount      Decimal @db.Decimal(14, 2)
 
   structure EmployeeSalaryStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
   component SalaryComponent         @relation(fields: [componentId], references: [id])
@@ -1120,9 +1120,9 @@ model EmployeePayrollConfig {
   id            String   @id @default(cuid())
   companyId     String   @map("company_id")
   employeeId    String   @unique @map("employee_id")
-  grossMonthly  Float    @map("gross_monthly")
-  dailySalary   Float?   @map("daily_salary")
-  hourlySalary  Float?   @map("hourly_salary")
+  grossMonthly  Decimal    @map("gross_monthly") @db.Decimal(14, 2)
+  dailySalary   Decimal?   @map("daily_salary") @db.Decimal(14, 2)
+  hourlySalary  Decimal?   @map("hourly_salary") @db.Decimal(14, 2)
   salaryType    String   @default("MONTHLY") @map("salary_type")
   effectiveFrom DateTime @map("effective_from") @db.Date
   workingDays   Int      @default(30) @map("working_days")
@@ -1141,8 +1141,8 @@ model SalaryRevision {
   companyId  String   @map("company_id")
   employeeId String   @map("employee_id")
   effectiveFrom DateTime @map("effective_from") @db.Date
-  previousCtc Float?  @map("previous_ctc")
-  newCtc     Float    @map("new_ctc")
+  previousCtc Decimal?  @map("previous_ctc") @db.Decimal(14, 2)
+  newCtc     Decimal    @map("new_ctc") @db.Decimal(14, 2)
   reason     String?
   createdBy  String?  @map("created_by")
   snapshot   Json?
@@ -1181,14 +1181,14 @@ model PayrollLine {
   employeeId    String   @map("employee_id")
   earningsJson  Json     @map("earnings_json")
   deductionsJson Json    @map("deductions_json")
-  grossEarnings Float    @map("gross_earnings")
-  totalDeductions Float  @map("total_deductions")
-  netPay        Float    @map("net_pay")
+  grossEarnings Decimal    @map("gross_earnings") @db.Decimal(14, 2)
+  totalDeductions Decimal  @map("total_deductions") @db.Decimal(14, 2)
+  netPay        Decimal    @map("net_pay") @db.Decimal(14, 2)
   attendanceDays Float?  @map("attendance_days")
   lopDays       Float    @default(0) @map("lop_days")
   notes         String?
   paidAt        DateTime? @map("paid_at")
-  paidAmount    Float?    @map("paid_amount")
+  paidAmount    Decimal?    @map("paid_amount") @db.Decimal(14, 2)
   paidBy        String?   @map("paid_by")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
@@ -1206,8 +1206,8 @@ model EsdLedgerEntry {
   companyId   String       @map("company_id")
   employeeId  String       @map("employee_id")
   entryType   EsdEntryType @map("entry_type")
-  amount      Float
-  balanceAfter Float       @map("balance_after")
+  amount      Decimal @db.Decimal(14, 2)
+  balanceAfter Decimal       @map("balance_after") @db.Decimal(14, 2)
   year        Int
   month       Int?
   note        String?
@@ -1226,11 +1226,11 @@ model LoanAdvance {
   companyId       String            @map("company_id")
   employeeId      String            @map("employee_id")
   type            LoanAdvanceType
-  amount          Float
+  amount          Decimal @db.Decimal(14, 2)
   interestRate    Float             @default(0) @map("interest_rate")
   tenureMonths    Int               @map("tenure_months")
-  emiAmount       Float             @map("emi_amount")
-  outstanding     Float
+  emiAmount       Decimal             @map("emi_amount") @db.Decimal(14, 2)
+  outstanding     Decimal @db.Decimal(14, 2)
   reason          String?
   status          LoanAdvanceStatus @default(PENDING)
   approvedBy      String?           @map("approved_by")
@@ -1255,7 +1255,7 @@ model LoanEmiSchedule {
   installmentNo Int       @map("installment_no")
   dueYear       Int       @map("due_year")
   dueMonth      Int       @map("due_month")
-  amount        Float
+  amount        Decimal @db.Decimal(14, 2)
   paidAt        DateTime? @map("paid_at")
   createdAt     DateTime  @default(now()) @map("created_at")
 
@@ -1270,7 +1270,7 @@ model LoanRecoveryEntry {
   loanAdvanceId String   @map("loan_advance_id")
   year          Int
   month         Int
-  amount        Float
+  amount        Decimal @db.Decimal(14, 2)
   payrollRunId  String?  @map("payroll_run_id")
   note          String?
   createdAt     DateTime @default(now()) @map("created_at")
@@ -1286,7 +1286,7 @@ model ReimbursementClaim {
   companyId    String               @map("company_id")
   employeeId   String               @map("employee_id")
   category     String
-  amount       Float
+  amount       Decimal @db.Decimal(14, 2)
   description  String?
   receiptUrl   String?              @map("receipt_url")
   status       ReimbursementStatus  @default(PENDING)
@@ -1412,7 +1412,7 @@ model Asset {
   brand        String?
   model        String?
   purchaseDate DateTime?   @map("purchase_date") @db.Date
-  purchaseCost Float?      @map("purchase_cost")
+  purchaseCost Decimal?      @map("purchase_cost") @db.Decimal(14, 2)
   status       AssetStatus @default(AVAILABLE)
   notes        String?
   createdAt    DateTime    @default(now()) @map("created_at")
@@ -1453,7 +1453,7 @@ model AssetDamageCharge {
   companyId    String             @map("company_id")
   assetId      String             @map("asset_id")
   employeeId   String             @map("employee_id")
-  amount       Float
+  amount       Decimal @db.Decimal(14, 2)
   description  String?
   status       DamageChargeStatus @default(PENDING)
   payrollRunId String?            @map("payroll_run_id")
@@ -1521,9 +1521,9 @@ model FnfSettlement {
   employeeId    String    @map("employee_id")
   status        FnfStatus @default(DRAFT)
   linesJson     Json      @map("lines_json")
-  grossCredits  Float     @map("gross_credits")
-  grossDebits   Float     @map("gross_debits")
-  netPayable    Float     @map("net_payable")
+  grossCredits  Decimal     @map("gross_credits") @db.Decimal(14, 2)
+  grossDebits   Decimal     @map("gross_debits") @db.Decimal(14, 2)
+  netPayable    Decimal     @map("net_payable") @db.Decimal(14, 2)
   generatedAt   DateTime  @default(now()) @map("generated_at")
   finalizedAt   DateTime? @map("finalized_at")
   finalizedBy   String?   @map("finalized_by")

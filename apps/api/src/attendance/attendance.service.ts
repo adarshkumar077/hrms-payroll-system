@@ -34,6 +34,7 @@ import {
   normalizePayrollConfig,
   type EmployeePayrollConfigJson,
 } from '../payroll/payroll-calculator';
+import * as M from '../common/money';
 import { buildAttendancePayrollWorkbook } from './attendance-payroll-export';
 import {
   buildMapsUrl,
@@ -91,7 +92,8 @@ function haversineM(lat1: number, lon1: number, lat2: number, lon2: number) {
 }
 
 function recordSnapshot(record: Record<string, unknown>) {
-  return JSON.stringify(record);
+  // Money columns are Prisma.Decimal — snapshot them as 2dp numbers, not strings.
+  return JSON.stringify(M.serializeMoney(record));
 }
 
 @Injectable()
@@ -1100,7 +1102,7 @@ export class AttendanceService implements OnModuleInit {
       grossMonthly: number;
     }[] = [];
 
-    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    const round2 = M.toNumber;
 
     for (const emp of employees) {
       // Own sheet (or HR): show GPS location captured at check-in/out
@@ -1186,7 +1188,7 @@ export class AttendanceService implements OnModuleInit {
           );
         }
 
-        if (todaysEarnings != null) runningTotal = round2(runningTotal + todaysEarnings);
+        if (todaysEarnings != null) runningTotal = round2(M.add(runningTotal, todaysEarnings));
 
         rows.push({
           employeeId: emp.id,
@@ -1285,12 +1287,12 @@ export class AttendanceService implements OnModuleInit {
       where: { employeeId: { in: empIds } },
     });
     const payrollByEmp = new Map(payrollConfigs.map((c) => [c.employeeId, c]));
-    const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    const r2 = M.toNumber;
 
     const employees = empIds.map((id) => {
       const sample = sheet.rows.find((r) => r.employeeId === id)!;
       const cfg = payrollByEmp.get(id);
-      const grossMonthly = sample.grossMonthly || cfg?.grossMonthly || 0;
+      const grossMonthly = sample.grossMonthly || M.toNumber(cfg?.grossMonthly);
       const dailySalary = calcDailySalary(grossMonthly, calendarDays);
       let pf = 0;
       let esd = 0;
@@ -1311,7 +1313,7 @@ export class AttendanceService implements OnModuleInit {
           esd = preview.esd;
           tds = preview.tds;
           professionalTax = preview.professionalTax;
-          otherDeductions = r2(preview.otherDeductions + preview.professionalTax);
+          otherDeductions = r2(M.add(preview.otherDeductions, preview.professionalTax));
           esdRemainingBalance = preview.esdRemainingBalance;
           esdDeductedToDate = config.deductions.esd.deductedToDate ?? 0;
           esdEnabled = !!config.deductions.esd.enabled;
@@ -1430,7 +1432,7 @@ export class AttendanceService implements OnModuleInit {
     });
     const gross = payrollCfg?.grossMonthly ?? 0;
     const dailySalary = calcDailySalary(gross, daysInMonth);
-    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    const round2 = M.toNumber;
 
     /** Statuses the late-cycle may set to HD / restore to L or P */
     const cycleMutable = new Set<AttendanceDayStatus>([
@@ -1479,7 +1481,7 @@ export class AttendanceService implements OnModuleInit {
         }
       }
 
-      let todaysEarnings = rec.todaysEarnings;
+      let todaysEarnings = M.toNumberOrNull(rec.todaysEarnings);
       if (rec.checkInAt && rec.checkOutAt) {
         todaysEarnings = round2(calcDailyEarning(nextStatus, dailySalary).amount);
       } else if (
@@ -1495,8 +1497,7 @@ export class AttendanceService implements OnModuleInit {
       const statusChanged = nextStatus !== rec.status;
       const earnChanged =
         todaysEarnings != null &&
-        (rec.todaysEarnings == null ||
-          Math.abs((rec.todaysEarnings ?? 0) - todaysEarnings) > 0.001);
+        (rec.todaysEarnings == null || !M.round2(rec.todaysEarnings).equals(M.round2(todaysEarnings)));
 
       if (statusChanged || earnChanged) {
         await this.prisma.attendanceRecord.update({

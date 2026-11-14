@@ -13,10 +13,9 @@ import {
   normalizePayrollConfig,
   TDS_PERCENT,
 } from '../payroll/payroll-calculator';
+import * as M from '../common/money';
 
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
+const roundMoney = M.toNumber;
 
 @Injectable()
 export class EmployeePayrollService {
@@ -122,9 +121,9 @@ export class EmployeePayrollService {
     const data = {
       companyId: actor.companyId,
       employeeId,
-      grossMonthly: roundMoney(dto.grossMonthly),
-      dailySalary: roundMoney(dailySalary),
-      hourlySalary: dto.hourlySalary != null ? roundMoney(dto.hourlySalary) : null,
+      grossMonthly: M.toDb(dto.grossMonthly),
+      dailySalary: M.toDb(dailySalary),
+      hourlySalary: M.toDbOrNull(dto.hourlySalary),
       salaryType: dto.salaryType ?? 'MONTHLY',
       effectiveFrom: new Date(dto.effectiveFrom),
       workingDays,
@@ -168,7 +167,7 @@ export class EmployeePayrollService {
       const pt = deductions.find((d) => d.code === 'PT')?.amount ?? 0;
       const other = deductions
         .filter((d) => !['PF', 'TDS', 'ESD', 'PT', 'LOP', 'LOAN_EMI'].includes(d.code))
-        .reduce((s, d) => s + d.amount, 0);
+        .reduce((s, d) => s.plus(M.money(d.amount)), M.money(0));
 
       return {
         id: line.id,
@@ -185,7 +184,7 @@ export class EmployeePayrollService {
         tds,
         deposit: esd,
         professionalTax: pt,
-        otherDeductions: other,
+        otherDeductions: roundMoney(other),
         totalEarnings: line.grossEarnings,
         totalDeductions: line.totalDeductions,
         netSalary: line.netPay,
@@ -220,7 +219,7 @@ export class EmployeePayrollService {
       orderBy: { date: 'asc' },
     });
 
-    let runningTotal = 0;
+    let runningTotal = M.money(0);
     let presentDays = 0;
     let absentDays = 0;
     let halfDays = 0;
@@ -232,7 +231,7 @@ export class EmployeePayrollService {
       if (['A', 'ULOB'].includes(row.status)) absentDays += 1;
       if (row.status === 'HD') halfDays += 1;
       if (row.status === 'L') lateMarks += 1;
-      runningTotal += earning.amount;
+      runningTotal = runningTotal.plus(earning.amount);
       return {
         date: row.date,
         dayName: row.date.toLocaleDateString('en-IN', { weekday: 'long' }),
@@ -250,10 +249,11 @@ export class EmployeePayrollService {
 
     const preview = calcPayrollPreview({ grossMonthly, config });
     const attendanceRatio = workingDays > 0 ? presentDays / workingDays : 1;
-    const proRatedGross = roundMoney(grossMonthly * attendanceRatio);
-    const expectedMonthEnd = Math.max(
-      0,
-      proRatedGross + preview.totalAllowances - preview.totalDeductions,
+    // gross × presentDays ÷ workingDays, exact then rounded once.
+    const proRatedGross =
+      workingDays > 0 ? roundMoney(M.div(M.mul(grossMonthly, presentDays), workingDays)) : roundMoney(grossMonthly);
+    const expectedMonthEnd = roundMoney(
+      M.nonNegative(M.sub(M.add(proRatedGross, preview.totalAllowances), preview.totalDeductions)),
     );
 
     return {
@@ -269,7 +269,7 @@ export class EmployeePayrollService {
       holidays: attendance.filter((a) => a.status === 'H').length,
       currentGrossEarnings: proRatedGross,
       currentTotalDeductions: preview.totalDeductions,
-      currentNetSalary: Math.max(0, proRatedGross + preview.totalAllowances - preview.totalDeductions),
+      currentNetSalary: expectedMonthEnd,
       attendanceIncentive: config.allowances.incentive ?? 0,
       expectedMonthEndSalary: expectedMonthEnd,
       daily,

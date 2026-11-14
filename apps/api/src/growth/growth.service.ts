@@ -16,6 +16,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
+import * as M from '../common/money';
 import {
   AssignTrainingDto,
   CompleteTrainingDto,
@@ -247,7 +248,7 @@ export class GrowthService {
         type: 'INCREMENT',
         title: 'Salary increment',
         description: item.reason ?? 'Compensation revision recorded.',
-        amount: item.newCtc - (item.previousCtc ?? 0),
+        amount: M.toNumber(M.sub(item.newCtc, item.previousCtc)),
         date: item.effectiveFrom.toISOString(),
       })),
       ...reviews.map((item) => ({

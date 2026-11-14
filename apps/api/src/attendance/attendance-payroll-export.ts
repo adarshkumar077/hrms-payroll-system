@@ -5,7 +5,8 @@ import {
   displayAttendanceStatus,
   displayDailyEarning,
 } from './late-conversion';
-import { calcMonthNetPayable } from '../payroll/payroll-calculator';
+import { calcDailySalary, calcMonthNetPayable } from '../payroll/payroll-calculator';
+import * as M from '../common/money';
 
 const BLUE = 'FF1D4ED8';
 const BLUE_DARK = 'FF1E3A8A';
@@ -93,8 +94,9 @@ function fmtDate(iso: string) {
   return `${d}-${m}-${y}`;
 }
 
-function fmtInr(n: number) {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
+/** 2dp HALF_UP money value for a cell (exact decimal rounding). */
+function fmtInr(n: M.MoneyInput) {
+  return M.toNumber(n);
 }
 
 function statusFill(status: string): string | null {
@@ -238,7 +240,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
     );
     const overtimeEarnings = 0; // OT tracked in minutes; pay uses fixed daily rules
     const totalMonthlyEarnings = fmtInr(
-      e.grossMonthly - agg.absentDeduction - agg.normalHalfDayDeduction - agg.lateConversionDeduction,
+      M.sub(e.grossMonthly, agg.absentDeduction, agg.normalHalfDayDeduction, agg.lateConversionDeduction),
     );
     const finalNet = calcMonthNetPayable({
       grossMonthly: e.grossMonthly,
@@ -252,13 +254,15 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
       otherDeductions: e.otherDeductions,
     });
     const totalDeductions = fmtInr(
-      agg.absentDeduction +
-        agg.normalHalfDayDeduction +
-        agg.lateConversionDeduction +
-        e.pf +
-        e.esd +
-        e.tds +
+      M.add(
+        agg.absentDeduction,
+        agg.normalHalfDayDeduction,
+        agg.lateConversionDeduction,
+        e.pf,
+        e.esd,
+        e.tds,
         e.otherDeductions,
+      ),
     );
     return {
       meta: { ...e, dailySalary: e.dailySalary || calcFallbackDaily(e.grossMonthly, input.calendarDays), calendarDays: input.calendarDays },
@@ -292,12 +296,12 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
         acc.hd += agg.halfDays;
         acc.late += agg.lateMarks;
         acc.converted += agg.convertedHd;
-        acc.gross += meta.grossMonthly;
-        acc.pf += meta.pf;
-        acc.esd += meta.esd;
-        acc.tds += meta.tds;
-        acc.deduct += totalDeductions;
-        acc.net += finalNet;
+        acc.gross = fmtInr(M.add(acc.gross, meta.grossMonthly));
+        acc.pf = fmtInr(M.add(acc.pf, meta.pf));
+        acc.esd = fmtInr(M.add(acc.esd, meta.esd));
+        acc.tds = fmtInr(M.add(acc.tds, meta.tds));
+        acc.deduct = fmtInr(M.add(acc.deduct, totalDeductions));
+        acc.net = fmtInr(M.add(acc.net, finalNet));
         return acc;
       },
       { present: 0, absent: 0, hd: 0, late: 0, converted: 0, gross: 0, pf: 0, esd: 0, tds: 0, deduct: 0, net: 0 },
@@ -736,6 +740,5 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
 }
 
 function calcFallbackDaily(gross: number, days: number) {
-  if (days <= 0) return 0;
-  return Math.round((gross / days + Number.EPSILON) * 100) / 100;
+  return calcDailySalary(gross, days);
 }
