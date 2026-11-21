@@ -60,6 +60,8 @@ A self-hosted **HR & Payroll platform for a single Indian company** (EITF Enhanc
 
 ## 4. Findings
 
+> **Status (2026-11-21):** every finding in this section has been fixed on the `audit-fixes` branch, except the owner/launch items. See the progress table in [EXECUTION-PLAN.md](EXECUTION-PLAN.md) and the Addendum below for issues found during the work.
+
 ### 🔴 Critical — must fix before go-live
 
 | # | Finding | Location |
@@ -168,7 +170,7 @@ A self-hosted **HR & Payroll platform for a single Indian company** (EITF Enhanc
 | Docker Compose + Cloudflare Tunnel (recommended) | `docker-compose.yml`, `deploy/cloudflare/config.yml` | No open ports; `npm run docker:up:tunnel` |
 | Docker Compose + nginx + Let's Encrypt | `deploy/nginx/`, `deploy/certbot/init-letsencrypt.sh` | Requires ports 80/443 |
 | Caddy | `deploy/Caddyfile` | Automatic HTTPS |
-| systemd on VPS | `deploy/systemd/eitf-hrms.service`, `deploy/vps-install.sh` | Non-Docker option |
+| systemd on the host | `deploy/systemd/eitf-hrms.service`, `deploy/vps-install.sh` | Starts the Docker Compose stack on boot |
 
 Minimum server: **4 GB RAM, 2 vCPU, 40 GB SSD** (more if selfies stay in the DB).
 

@@ -9,7 +9,8 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/eitf-hrms
 EnvironmentFile=/opt/eitf-hrms/.env.production
-ExecStart=/usr/bin/docker compose --env-file .env.production --profile tunnel up -d --build
+# Profiles (tunnel / ssl / none) come from COMPOSE_PROFILES in .env.production.
+ExecStart=/usr/bin/docker compose --env-file .env.production up -d --build
 ExecStop=/usr/bin/docker compose --env-file .env.production down
 TimeoutStartSec=600
 

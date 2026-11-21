@@ -9,8 +9,12 @@ if (!base || base.includes('localhost') || base.includes('192.168')) {
   process.exit(1);
 }
 
-const user = process.env.LOAD_TEST_USER || 'admin@eitf.in';
-const pass = process.env.LOAD_TEST_PASS || 'Admin@123';
+const user = process.env.LOAD_TEST_USER;
+const pass = process.env.LOAD_TEST_PASS;
+if (!user || !pass) {
+  console.error('Set LOAD_TEST_USER and LOAD_TEST_PASS to a real admin login (one that has changed its first password).');
+  process.exit(2);
+}
 
 const checks = [];
 

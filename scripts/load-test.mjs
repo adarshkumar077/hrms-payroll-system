@@ -5,12 +5,16 @@
  *   node scripts/load-test.mjs [baseUrl] [concurrency]
  *   node scripts/load-test.mjs https://hrms.yourdomain.com 15
  *
- * Env: LOAD_TEST_USER, LOAD_TEST_PASS (default: superadmin / Super@123)
+ * Env: LOAD_TEST_USER, LOAD_TEST_PASS (required: a real admin login)
  */
 const base = (process.argv[2] || process.env.PUBLIC_APP_URL || 'http://localhost:8080').replace(/\/$/, '');
 const concurrency = Number(process.argv[3] || process.env.LOAD_TEST_CONCURRENCY || 15);
-const loginId = process.env.LOAD_TEST_USER || 'superadmin';
-const password = process.env.LOAD_TEST_PASS || 'Super@123';
+const loginId = process.env.LOAD_TEST_USER;
+const password = process.env.LOAD_TEST_PASS;
+if (!loginId || !password) {
+  console.error('Set LOAD_TEST_USER and LOAD_TEST_PASS to a real admin login (one that has changed its first password).');
+  process.exit(2);
+}
 
 async function timed(label, fn) {
   const t0 = performance.now();

@@ -59,6 +59,7 @@ No other demo accounts exist. Create users from **Admin → Users**.
 | User manuals | `docs/USER_MANUALS.md` · Web `/help` |
 | Training | `docs/TRAINING.md` |
 | Deployment | `docs/DEPLOYMENT.md` |
+| Hosting on your own dedicated server (authoritative) | `docs/HOSTING-DEDICATED-SERVER.md` |
 | Backup & recovery | `docs/BACKUP_AND_RECOVERY.md` |
 | Audit & security | `docs/AUDIT_AND_SECURITY.md` |
 | Database | `docs/DATABASE.md` |

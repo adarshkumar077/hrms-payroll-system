@@ -1,5 +1,7 @@
 # EITF HRMS + Payroll + CRM — Production Deployment Guide
 
+> **Superseded.** This document predates the 2026-11 audit fixes and contains outdated logins, backup and restore steps. For hosting, follow [HOSTING-DEDICATED-SERVER.md](HOSTING-DEDICATED-SERVER.md). Kept for history only.
+
 Complete guide for **24×7 Docker deployment on a Cloud VPS** with **one permanent HTTPS URL** via Cloudflare Tunnel (recommended) or Let's Encrypt.
 
 ---

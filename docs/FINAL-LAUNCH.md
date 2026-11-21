@@ -1,5 +1,7 @@
 # Final Launch Guide — HRMS + Payroll + CRM (Web + Mobile + VPS)
 
+> **Superseded.** This document predates the 2026-11 audit fixes and contains outdated logins, backup and restore steps. For hosting, follow [HOSTING-DEDICATED-SERVER.md](HOSTING-DEDICATED-SERVER.md). Kept for history only.
+
 ## Honest status (read first)
 
 | Item | Status |
@@ -135,7 +137,7 @@ node scripts/load-test.mjs https://hrms.yourcompany.com 15
 - [ ] HRMS: employees, attendance, leave, payroll
 - [ ] CRM: leads, tasks, assign, complete, verify
 - [ ] Backups: `docker volume ls | grep eitf_db_backups`
-- [ ] Restore test: `scripts/restore-db.sh` (on staging copy)
+- [ ] Restore test: `deploy/backup/restore.sh` (on staging copy; see docs/BACKUP_AND_RECOVERY.md)
 - [ ] Change default passwords after first login
 - [ ] Remove demo data if any
 
