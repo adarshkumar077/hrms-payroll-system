@@ -17,6 +17,7 @@
     "prisma:ensure-accounts": "tsx --import dotenv/config prisma/ensure-accounts.ts",
     "prisma:bootstrap-super-admin": "tsx --import dotenv/config prisma/bootstrap-super-admin.ts",
     "prisma:studio": "prisma studio",
+    "demo:seed": "node scripts/demo/seed-demo.cjs",
     "db:migrate-selfies": "tsx --import dotenv/config prisma/migrate-selfies-to-storage.ts"
   },
   "dependencies": {

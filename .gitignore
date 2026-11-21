@@ -37,3 +37,6 @@ apps/web/certificates/
 
 # Off-site backup rclone config (contains cloud credentials; see docs/BACKUP_AND_RECOVERY.md)
 deploy/backup/rclone/
+
+# Local-only notes/credentials (e.g. DEMO-LOGINS.local.md)
+*.local.md

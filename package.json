@@ -20,6 +20,7 @@
     "db:seed": "npm run prisma:seed -w @eitf/api",
     "db:ensure-accounts": "npm run prisma:ensure-accounts -w @eitf/api",
     "db:studio": "npm run prisma:studio -w @eitf/api",
+    "demo:seed": "npm run demo:seed -w @eitf/api --",
     "db:up": "node scripts/start-embedded-pg.mjs",
     "start:all": "node scripts/start-localhost.mjs",
     "start:localhost": "node scripts/start-localhost.mjs",
