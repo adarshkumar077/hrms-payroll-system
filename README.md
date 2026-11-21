@@ -13,11 +13,11 @@ Phases **1–13 complete** (modules **2** and **14** skipped). See `docs/PHASE1.
 | Mobile | Expo (React Native) + EAS build profiles |
 | Jobs | `@nestjs/schedule` (backups, SLA helpers) |
 
-## Quick start (Windows / no Docker)
+## Quick start (no Docker)
 
 **Minimum daily start (2 terminals):** see [docs/MANUAL-START.md](docs/MANUAL-START.md).
 
-```powershell
+```bash
 # Terminal 1 — keep open
 npm run db:up
 
@@ -28,15 +28,15 @@ npm run start:localhost
 | Service | URL |
 |---|---|
 | Web (local HTTPS) | https://localhost:3000 |
-| Web (LAN HTTPS — GPS) | https://192.168.1.69:3000 |
+| Web (LAN HTTPS — GPS) | `https://<your-LAN-IP>:3000` (your machine's LAN IP, printed by `start:localhost`) |
 | Web (public) | URL printed by `start:localhost` / `.public-url.txt` |
 | API health | http://localhost:3001/api/v1/health |
 | Swagger | http://localhost:3001/api/docs |
 
 **First-time setup** (once after clone):
 
-```powershell
-cd C:\Users\Aadarsh\Projects\eitf-hrms
+```bash
+# from the repo root
 npm install
 npm run db:up
 # ensure apps/api/.env has DATABASE_URL for embedded Postgres
@@ -44,15 +44,12 @@ npm run db:migrate
 npm run db:seed
 ```
 
-## Login (after seed)
+## Login (first Super Admin)
 
-After `npm run db:seed` (empty DB only — seed never wipes existing users):
+- **Production:** set `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`. The first Super Admin is created from them with a forced password change. Without them, use the first-run screen at `/auth/setup/super-admin`.
+- **Local development:** `npm run db:seed` creates `admin@eitf.in` / `Admin@123` with a forced password change on first login. The seed never overwrites existing users.
 
-| User | Password | Role |
-|---|---|---|
-| `admin@eitf.in` | `Admin@123` | Super Admin |
-
-Seed does **not** create demo Admin/HR/Employee accounts. Create real users from the app (Admin Users).
+No other demo accounts exist. Create users from **Admin → Users**.
 
 ## Documentation pack (Phase 13)
 
@@ -62,6 +59,7 @@ Seed does **not** create demo Admin/HR/Employee accounts. Create real users from
 | User manuals | `docs/USER_MANUALS.md` · Web `/help` |
 | Training | `docs/TRAINING.md` |
 | Deployment | `docs/DEPLOYMENT.md` |
+| Hosting on your own dedicated server (authoritative) | `docs/HOSTING-DEDICATED-SERVER.md` |
 | Backup & recovery | `docs/BACKUP_AND_RECOVERY.md` |
 | Audit & security | `docs/AUDIT_AND_SECURITY.md` |
 | Database | `docs/DATABASE.md` |
@@ -69,8 +67,8 @@ Seed does **not** create demo Admin/HR/Employee accounts. Create real users from
 
 ## Mobile store builds
 
-```powershell
-cd apps\mobile
+```bash
+cd apps/mobile
 npx eas-cli build -p android --profile preview
 npx eas-cli build -p ios --profile production
 ```

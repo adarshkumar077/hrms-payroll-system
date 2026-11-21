@@ -1,5 +1,7 @@
 # EITF HRMS + Payroll + CRM — Production Deployment Guide
 
+> **Superseded.** This document predates the 2026-11 audit fixes and contains outdated logins, backup and restore steps. For hosting, follow [HOSTING-DEDICATED-SERVER.md](HOSTING-DEDICATED-SERVER.md). Kept for history only.
+
 Complete guide for **24×7 Docker deployment on a Cloud VPS** with **one permanent HTTPS URL** via Cloudflare Tunnel (recommended) or Let's Encrypt.
 
 ---
@@ -195,7 +197,7 @@ Survives: `docker compose restart`, server reboot, container rebuild.
 
 ### Manual backup
 ```bash
-docker exec eitf-hrms-db-backup /usr/local/bin/backup-db.sh
+docker exec eitf-hrms-db-backup /usr/local/bin/backup.sh once
 docker run --rm -v eitf_hrms_eitf_db_backups:/backups alpine ls -lh /backups
 ```
 
@@ -321,8 +323,8 @@ eitf-hrms/
 │   ├── certbot/                # Let's Encrypt init
 │   ├── systemd/                # Auto-start on reboot
 │   ├── up.sh / up.ps1          # Deploy scripts
+│   ├── backup/                 # Encrypted pg_dump + off-site upload + restore
 ├── scripts/
-│   ├── backup-db.sh            # Daily pg_dump
 │   ├── load-test.mjs           # Concurrent user test
 │   ├── soak-test.mjs           # Long-running stability
 │   ├── monitor-health.mjs      # Cron health probe

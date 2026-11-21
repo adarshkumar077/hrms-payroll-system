@@ -5,7 +5,8 @@ import {
   displayAttendanceStatus,
   displayDailyEarning,
 } from './late-conversion';
-import { calcMonthNetPayable } from '../payroll/payroll-calculator';
+import { calcDailySalary, calcMonthNetPayable } from '../payroll/payroll-calculator';
+import * as M from '../common/money';
 
 const BLUE = 'FF1D4ED8';
 const BLUE_DARK = 'FF1E3A8A';
@@ -93,8 +94,9 @@ function fmtDate(iso: string) {
   return `${d}-${m}-${y}`;
 }
 
-function fmtInr(n: number) {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
+/** 2dp HALF_UP money value for a cell (exact decimal rounding). */
+function fmtInr(n: M.MoneyInput) {
+  return M.toNumber(n);
 }
 
 function statusFill(status: string): string | null {
@@ -238,7 +240,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
     );
     const overtimeEarnings = 0; // OT tracked in minutes; pay uses fixed daily rules
     const totalMonthlyEarnings = fmtInr(
-      e.grossMonthly - agg.absentDeduction - agg.normalHalfDayDeduction - agg.lateConversionDeduction,
+      M.sub(e.grossMonthly, agg.absentDeduction, agg.normalHalfDayDeduction, agg.lateConversionDeduction),
     );
     const finalNet = calcMonthNetPayable({
       grossMonthly: e.grossMonthly,
@@ -252,13 +254,15 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
       otherDeductions: e.otherDeductions,
     });
     const totalDeductions = fmtInr(
-      agg.absentDeduction +
-        agg.normalHalfDayDeduction +
-        agg.lateConversionDeduction +
-        e.pf +
-        e.esd +
-        e.tds +
+      M.add(
+        agg.absentDeduction,
+        agg.normalHalfDayDeduction,
+        agg.lateConversionDeduction,
+        e.pf,
+        e.esd,
+        e.tds,
         e.otherDeductions,
+      ),
     );
     return {
       meta: { ...e, dailySalary: e.dailySalary || calcFallbackDaily(e.grossMonthly, input.calendarDays), calendarDays: input.calendarDays },
@@ -281,7 +285,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
     const start = addTitleBlock(sh, {
       companyName: input.companyName,
       title: 'MONTHLY ATTENDANCE & PAYROLL SUMMARY',
-      subtitle: `Period: ${period} · Calendar days: ${input.calendarDays} · Per-day = Gross ÷ ${input.calendarDays} · Late: ${input.lateToHalf}=1 HD · TDS 1% mandatory`,
+      subtitle: `Period: ${period} · Calendar days: ${input.calendarDays} · Per-day = Gross ÷ ${input.calendarDays} · Late: ${input.lateToHalf}=1 HD · TDS estimated from income-tax slabs (new regime)`,
       generatedAt: input.generatedAt,
     });
 
@@ -292,12 +296,12 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
         acc.hd += agg.halfDays;
         acc.late += agg.lateMarks;
         acc.converted += agg.convertedHd;
-        acc.gross += meta.grossMonthly;
-        acc.pf += meta.pf;
-        acc.esd += meta.esd;
-        acc.tds += meta.tds;
-        acc.deduct += totalDeductions;
-        acc.net += finalNet;
+        acc.gross = fmtInr(M.add(acc.gross, meta.grossMonthly));
+        acc.pf = fmtInr(M.add(acc.pf, meta.pf));
+        acc.esd = fmtInr(M.add(acc.esd, meta.esd));
+        acc.tds = fmtInr(M.add(acc.tds, meta.tds));
+        acc.deduct = fmtInr(M.add(acc.deduct, totalDeductions));
+        acc.net = fmtInr(M.add(acc.net, finalNet));
         return acc;
       },
       { present: 0, absent: 0, hd: 0, late: 0, converted: 0, gross: 0, pf: 0, esd: 0, tds: 0, deduct: 0, net: 0 },
@@ -315,7 +319,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
       ['Total Gross Salary', fmtInr(totals.gross)],
       ['Total PF Deductions', fmtInr(totals.pf)],
       ['Total Security Deposit', fmtInr(totals.esd)],
-      ['Total TDS (1%)', fmtInr(totals.tds)],
+      ['Total TDS', fmtInr(totals.tds)],
       ['Total All Deductions', fmtInr(totals.deduct)],
       ['Total Final Net Payable', fmtInr(totals.net)],
     ];
@@ -366,7 +370,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
       'Late Mark Half-Day Deduction',
       'PF Deduction',
       'Security Deposit Deduction',
-      'TDS (1%)',
+      'TDS',
       'Other Deductions',
       'Total Deductions',
       'Final Net Payable Salary',
@@ -459,7 +463,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
         ['Late Mark Half-Day Deduction', fmtInr(agg.lateConversionDeduction)],
         ['PF Deduction', fmtInr(meta.pf)],
         ['Security Deposit Deduction', fmtInr(meta.esd)],
-        ['TDS (1%)', fmtInr(meta.tds)],
+        ['TDS', fmtInr(meta.tds)],
         ['Other Deductions', fmtInr(meta.otherDeductions)],
         ['Total Deductions', totalDeductions],
         ['FINAL NET PAYABLE', finalNet],
@@ -596,7 +600,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
       'Late Mark Half-Day Deduction',
       'PF Deduction',
       'Security Deposit',
-      'TDS (1%)',
+      'TDS',
       'Other Deductions',
       'Total Deductions',
       'Final Net Payable',
@@ -695,16 +699,16 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
     setupPrint(sh, input.companyName, 'TDS Report');
     const start = addTitleBlock(sh, {
       companyName: input.companyName,
-      title: 'TDS REPORT (1% MANDATORY)',
-      subtitle: `Period: ${period} · TDS = Applicable Monthly Gross × 1% · Applied to every employee once`,
+      title: 'TDS REPORT (ESTIMATE — VERIFY WITH CA)',
+      subtitle: `Period: ${period} · TDS = projected annual income-tax (slabs, rebate, cess) ÷ 12 · Payroll run recalculates with year-to-date figures`,
       generatedAt: input.generatedAt,
     });
     const headers = [
       'Employee ID',
       'Employee Name',
       'Applicable Monthly Salary (Gross)',
-      'TDS Rate',
-      'TDS Amount (1%)',
+      'TDS Basis',
+      'TDS Amount',
     ];
     headers.forEach((h, i) => {
       sh.getCell(start, i + 1).value = h;
@@ -716,7 +720,7 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
       writeRow(
         sh,
         start + 1 + idx,
-        [meta.employeeCode, meta.employeeName, fmtInr(meta.grossMonthly), '1%', fmtInr(meta.tds)],
+        [meta.employeeCode, meta.employeeName, fmtInr(meta.grossMonthly), 'Income-tax slabs', fmtInr(meta.tds)],
         { alt: idx % 2 === 1, moneyCols: [3, 5] },
       );
     });
@@ -736,6 +740,5 @@ export async function buildAttendancePayrollWorkbook(input: PayrollExportInput):
 }
 
 function calcFallbackDaily(gross: number, days: number) {
-  if (days <= 0) return 0;
-  return Math.round((gross / days + Number.EPSILON) * 100) / 100;
+  return calcDailySalary(gross, days);
 }

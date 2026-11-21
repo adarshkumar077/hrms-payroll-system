@@ -13,6 +13,7 @@ import {
   calcDailySalary,
   calendarDaysInMonth,
 } from '../src/payroll/payroll-calculator';
+import * as M from '../src/common/money';
 
 const prisma = new PrismaClient();
 
@@ -60,7 +61,7 @@ async function reapplyForEmployee(
   const gross = payrollCfg?.grossMonthly ?? 0;
   // Always use actual calendar days of the month (not fixed 30 / stale dailySalary).
   const dailySalary = calcDailySalary(gross, daysInMonth);
-  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const round2 = M.toNumber;
 
   const cycleMutable = new Set<AttendanceDayStatus>([
     AttendanceDayStatus.P,
@@ -105,7 +106,7 @@ async function reapplyForEmployee(
       }
     }
 
-    let todaysEarnings = rec.todaysEarnings;
+    let todaysEarnings = M.toNumberOrNull(rec.todaysEarnings);
     if (rec.checkInAt && rec.checkOutAt) {
       todaysEarnings = round2(calcDailyEarning(nextStatus, dailySalary).amount);
     } else if (
@@ -120,7 +121,7 @@ async function reapplyForEmployee(
     const statusChanged = nextStatus !== rec.status;
     const earnChanged =
       todaysEarnings != null &&
-      (rec.todaysEarnings == null || Math.abs((rec.todaysEarnings ?? 0) - todaysEarnings) > 0.001);
+      (rec.todaysEarnings == null || !M.round2(rec.todaysEarnings).equals(M.round2(todaysEarnings)));
 
     if (statusChanged || earnChanged) {
       await prisma.attendanceRecord.update({

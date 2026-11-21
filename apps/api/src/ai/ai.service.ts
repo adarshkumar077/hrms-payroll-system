@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReportsService } from '../reports/reports.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
+import * as M from '../common/money';
 
 @Injectable()
 export class AiService {
@@ -424,7 +425,7 @@ export class AiService {
       ].join('\n\n');
     }
     if (/password|2fa|login|security/.test(q)) {
-      return `Password min length is ${map['security.password_min_length'] ?? 5}. Use Security Settings (Super Admin/HR) for 2FA enforcement and IP allow-list.`;
+      return `Password min length is ${map['security.password_min_length'] ?? 8}. Use Security Settings (Super Admin/HR) for 2FA enforcement and IP allow-list.`;
     }
     if (/resign|exit|fnf|reliev/.test(q)) {
       return 'Resignations are submitted from Exit. Clearance and F&F are managed by HR. Experience/relieving letters generate after F&F finalize.';
@@ -587,22 +588,26 @@ export class AiService {
     if (!run || !run.lines.length) {
       return { year: y, month: m, anomalies: [], note: 'No payroll lines for period' };
     }
-    const nets = run.lines.map((l) => l.netPay);
-    const avg = nets.reduce((a, b) => a + b, 0) / nets.length;
+    // Heuristic thresholds only — plain numbers are fine here (nothing is stored).
+    const nets = run.lines.map((l) => M.toNumber(l.netPay));
+    const avg = M.toNumber(M.div(M.sum(nets), nets.length));
     const anomalies = run.lines
       .map((l) => {
         const flags: string[] = [];
-        if (l.netPay <= 0) flags.push('Zero/negative net');
-        if (l.netPay > avg * 2.2) flags.push('Net >> team average');
-        if (l.netPay < avg * 0.35 && avg > 0) flags.push('Net << team average');
+        const net = M.toNumber(l.netPay);
+        const gross = M.toNumber(l.grossEarnings);
+        const ded = M.toNumber(l.totalDeductions);
+        if (net <= 0) flags.push('Zero/negative net');
+        if (net > avg * 2.2) flags.push('Net >> team average');
+        if (net < avg * 0.35 && avg > 0) flags.push('Net << team average');
         if (l.lopDays >= 10) flags.push('High LOP days');
-        if (l.totalDeductions > l.grossEarnings * 0.55) flags.push('Deductions >55% of gross');
+        if (ded > gross * 0.55) flags.push('Deductions >55% of gross');
         return flags.length
           ? {
               employeeCode: l.employee.employeeCode,
               name: `${l.employee.firstName} ${l.employee.lastName ?? ''}`.trim(),
-              net: l.netPay,
-              gross: l.grossEarnings,
+              net,
+              gross,
               lopDays: l.lopDays,
               flags,
             }
@@ -667,7 +672,7 @@ export class AiService {
         ? `Active-ish count (isActive true): ${data.rows.filter((r) => r.isActive === true || r.isActive === 'true').length}.`
         : '',
       kind === 'payroll'
-        ? `Net pay sum (sample period): ${data.rows.reduce((s, r) => s + Number(r.net ?? 0), 0)}.`
+        ? `Net pay sum (sample period): ${M.toFixed2(M.sumBy(data.rows, (r) => r.net as M.MoneyInput))}.`
         : '',
     ]
       .filter(Boolean)

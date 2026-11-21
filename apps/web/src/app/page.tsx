@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, clearSession, getStoredUser, setSession, SessionUser } from '@/lib/api';
+import { acceptSession, api, initSession, logout, SessionUser } from '@/lib/api';
 import { getHomePathForUser } from '@/lib/home';
 
 type LoginMode = 'password' | 'otp';
@@ -17,6 +17,8 @@ export default function LoginPage() {
   const [mobile, setMobile] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
+  // Local development only: the API returns the code when OTP_SHOW_IN_UI=true (no SMS gateway).
+  const [devOtp, setDevOtp] = useState<string | null>(null);
   const [totpCode, setTotpCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -28,11 +30,19 @@ export default function LoginPage() {
   const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
 
   useEffect(() => {
-    const u = getStoredUser();
-    if (!u) return;
-    router.replace(
-      u.forcePasswordChange ? '/account/password?required=true' : getHomePathForUser(u),
-    );
+    // Already signed in (httpOnly refresh cookie still valid)? Skip the login form.
+    let cancelled = false;
+    initSession()
+      .then((u) => {
+        if (cancelled || !u) return;
+        router.replace(
+          u.forcePasswordChange ? '/account/password?required=true' : getHomePathForUser(u),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   useEffect(() => {
@@ -66,7 +76,6 @@ export default function LoginPage() {
     try {
       const data = await api<{
         accessToken: string;
-        refreshToken: string;
         user: SessionUser;
         forcePasswordChange?: boolean;
       }>(
@@ -83,14 +92,7 @@ export default function LoginPage() {
           }),
         },
       );
-      setSession(data.accessToken, data.refreshToken, {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      });
-      const nextUser = {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      };
+      const nextUser = acceptSession(data);
       router.push(
         nextUser.forcePasswordChange ? '/account/password?required=true' : getHomePathForUser(nextUser),
       );
@@ -108,7 +110,6 @@ export default function LoginPage() {
     try {
       const data = await api<{
         accessToken: string;
-        refreshToken: string;
         user: SessionUser;
         forcePasswordChange?: boolean;
       }>('/auth/login', {
@@ -118,14 +119,7 @@ export default function LoginPage() {
         timeoutMs: 20000,
         body: JSON.stringify({ identifier, password, totpCode: totpCode || undefined }),
       });
-      setSession(data.accessToken, data.refreshToken, {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      });
-      const nextUser = {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      };
+      const nextUser = acceptSession(data);
       router.push(
         nextUser.forcePasswordChange ? '/account/password?required=true' : getHomePathForUser(nextUser),
       );
@@ -141,7 +135,12 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await api('/auth/otp/request', { method: 'POST', auth: false, body: JSON.stringify({ mobile }) });
+      const res = await api<{ devCode?: string }>('/auth/otp/request', {
+        method: 'POST',
+        auth: false,
+        body: JSON.stringify({ mobile }),
+      });
+      setDevOtp(res?.devCode ?? null);
       setOtpSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'OTP request failed');
@@ -157,7 +156,6 @@ export default function LoginPage() {
     try {
       const data = await api<{
         accessToken: string;
-        refreshToken: string;
         user: SessionUser;
         forcePasswordChange?: boolean;
       }>('/auth/otp/verify', {
@@ -165,14 +163,7 @@ export default function LoginPage() {
         auth: false,
         body: JSON.stringify({ mobile, code: otp, totpCode: totpCode || undefined }),
       });
-      setSession(data.accessToken, data.refreshToken, {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      });
-      const nextUser = {
-        ...data.user,
-        forcePasswordChange: data.forcePasswordChange ?? data.user.forcePasswordChange,
-      };
+      const nextUser = acceptSession(data);
       router.push(
         nextUser.forcePasswordChange ? '/account/password?required=true' : getHomePathForUser(nextUser),
       );
@@ -303,7 +294,7 @@ export default function LoginPage() {
                   onChange={(e) => setSetupPassword(e.target.value)}
                   type="password"
                   required
-                  minLength={5}
+                  minLength={8}
                 />
               </label>
               <label className="block">
@@ -314,7 +305,7 @@ export default function LoginPage() {
                   onChange={(e) => setSetupConfirmPassword(e.target.value)}
                   type="password"
                   required
-                  minLength={5}
+                  minLength={8}
                 />
               </label>
               {error && <p className="text-sm text-danger bg-danger-light/50 rounded-xl px-3 py-2">{error}</p>}
@@ -411,6 +402,22 @@ export default function LoginPage() {
               </label>
               {otpSent && (
                 <>
+                  {devOtp && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                      <span className="font-medium">Development mode:</span> your OTP is{' '}
+                      <button
+                        type="button"
+                        className="font-mono text-base font-semibold tracking-widest underline"
+                        onClick={() => setOtp(devOtp)}
+                        title="Fill the OTP field"
+                      >
+                        {devOtp}
+                      </button>
+                      <span className="block text-xs text-amber-800">
+                        Shown because no SMS gateway is configured. Never enabled in production.
+                      </span>
+                    </div>
+                  )}
                   <label className="block">
                     <span className="text-sm font-medium text-ink-700">OTP code</span>
                     <input className="input mt-1.5" value={otp} onChange={(e) => setOtp(e.target.value)} required />
@@ -431,7 +438,7 @@ export default function LoginPage() {
           <button
             type="button"
             className="mt-6 text-xs text-ink-400 hover:text-ink-600 transition-colors"
-            onClick={() => { clearSession(); setError(''); }}
+            onClick={() => { void logout(); setError(''); }}
           >
             Clear local session
           </button>

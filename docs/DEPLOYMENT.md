@@ -14,7 +14,7 @@ cp .env.production.example .env.production
 
 | Env | Purpose |
 |---|---|
-| Local | Embedded Postgres (`npm run db:up` on **5433**) or Docker Compose |
+| Local | Embedded Postgres (`npm run db:up` on **5435**) or Docker Compose |
 | Staging / Prod | Managed Postgres + API + Web + Mobile store builds |
 
 ## Prerequisites
@@ -26,11 +26,11 @@ cp .env.production.example .env.production
 
 ## Local (no Docker)
 
-```powershell
-cd C:\Users\Aadarsh\Projects\eitf-hrms
+```bash
+# from the repo root
 npm install
 npm run db:up
-copy .env.example apps\api\.env   # adjust DATABASE_URL if needed
+cp .env.example apps/api/.env   # adjust DATABASE_URL if needed
 npm run db:migrate
 npm run db:seed
 npm run dev:api
@@ -47,6 +47,7 @@ npm run dev:web
    - `DATABASE_URL`
    - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`
    - `CORS_ORIGINS` (comma-separated web origins)
+   - `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` for the first Super Admin (or use `/auth/setup/super-admin` on first run)
    - Optional: `OPENAI_API_KEY`, SMS/email provider keys
 2. Build & run:
 
@@ -58,6 +59,40 @@ npm run start:prod -w @eitf/api
 
 3. Put TLS terminator in front; forward to `API_PORT` (default 3001).
 4. Schedule OS-level backups of Postgres **and** rely on in-app `POST /security/backups/run` JSON snapshots under `data/backups/`.
+
+## Object storage (selfies and documents)
+
+Attendance selfies and HR documents are stored as objects; Postgres keeps only keys
+(`storage:selfies/<companyId>/<yyyy-mm>/<recordId>-<in|out>-<random>.jpg`). Selfies are returned to
+the client as short-lived (5 min) signed URLs, only to users already allowed to see them.
+
+- `STORAGE_DRIVER=local` (default): files under `LOCAL_STORAGE_DIR` (mount a persistent volume).
+  Signed links are HMAC-signed `GET /api/v1/storage/object?...` URLs (`STORAGE_SIGNING_SECRET`,
+  falling back to `JWT_ACCESS_SECRET`; set `API_PUBLIC_URL` if the web app is on another origin).
+- `STORAGE_DRIVER=s3`: any S3-compatible service. Cloudflare R2 example:
+
+```env
+STORAGE_DRIVER=s3
+S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
+S3_REGION=auto
+S3_BUCKET=eitf-hrms-files
+S3_ACCESS_KEY_ID=<R2 API token access key>
+S3_SECRET_ACCESS_KEY=<R2 API token secret>
+S3_FORCE_PATH_STYLE=false
+```
+
+  Keep the bucket private (no public access); the API presigns reads. Documents uploaded while on
+  `local` stay readable after switching (each row records its driver), but new files go to S3 and
+  existing local files are not copied automatically.
+
+Migrating existing base64 selfies (run once after deploy; safe to re-run):
+
+```bash
+npm run db:migrate-selfies              # dry run: prints counts and bytes
+npm run db:migrate-selfies -- --apply   # upload + rewrite rows to storage: keys
+```
+
+The API JSON body limit is 4 MB; selfies are validated (JPEG/PNG/WebP magic bytes, max 2 MB decoded).
 
 ## Production Web
 
@@ -83,7 +118,7 @@ Set `EXPO_PUBLIC_API_URL` for the target environment.
 ## Migrations
 
 ```bash
-# stop Nest watch on Windows before prisma generate if you hit EPERM
+# on Windows, stop the Nest watcher before prisma generate if you hit EPERM
 npm run prisma:migrate -w @eitf/api   # dev
 npm run prisma:deploy -w @eitf/api    # prod
 ```

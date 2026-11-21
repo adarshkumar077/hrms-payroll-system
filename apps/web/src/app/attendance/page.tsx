@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Suspense, useEffect, useState, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { api, getStoredUser, getToken, getApiBaseUrl } from '@/lib/api';
+import { api, getStoredUser, getApiBaseUrl, authFetch } from '@/lib/api';
 import { canManageAttendance, canUpdateAttendance } from '@/lib/roles';
 import { notifyAttendanceChanged, onAttendanceChanged } from '@/lib/attendance-sync';
 
@@ -361,11 +361,8 @@ function AttendanceConsoleInner() {
   async function exportReport(fmt: 'excel' | 'pdf') {
     setError('');
     try {
-      const token = getToken();
       const path = `/reports/attendance/export/${fmt}?year=${filterYear}&month=${filterMonth}`;
-      const res = await fetch(`${getApiBaseUrl()}${path}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await authFetch(`${getApiBaseUrl()}${path}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { message?: string }).message ?? `Export failed (${res.status})`);

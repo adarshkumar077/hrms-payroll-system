@@ -138,7 +138,7 @@ export class CreateEmployeeDto {
   @ApiPropertyOptional({ description: 'Initial password (required when createLogin is true)' })
   @IsOptional()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   password?: string;
 
   @ApiPropertyOptional({ description: 'Must match password when provided' })
@@ -149,7 +149,7 @@ export class CreateEmployeeDto {
   @ApiPropertyOptional({ deprecated: true, description: 'Use password instead' })
   @IsOptional()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   temporaryPassword?: string;
 }
 
@@ -213,7 +213,7 @@ export class ChangeUsernameDto {
 
 export class ResetCredentialsDto {
   @IsOptional() @IsString() username?: string;
-  @IsOptional() @IsString() @MinLength(5) password?: string;
+  @IsOptional() @IsString() @MinLength(8) password?: string;
   @IsOptional() @IsBoolean() generatePassword?: boolean;
 }
 

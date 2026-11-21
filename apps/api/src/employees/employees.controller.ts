@@ -164,6 +164,17 @@ export class EmployeesController {
     return this.employeePayroll.upsertConfig(user, id, dto);
   }
 
+  /** Statutory preview (PF / ESI / PT / TDS) for an unsaved salary config; writes nothing. */
+  @Post('employees/:id/payroll-config/preview')
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
+  previewPayrollConfig(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: PayrollConfigBodyDto,
+  ) {
+    return this.employeePayroll.previewConfig(user, id, dto);
+  }
+
   @Get('employees/:id/payroll-history')
   @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE, RoleCode.ADMIN)
   payrollHistory(@CurrentUser() user: AuthUser, @Param('id') id: string) {

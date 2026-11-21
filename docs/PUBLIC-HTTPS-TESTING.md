@@ -1,5 +1,7 @@
 # Public HTTPS access (any phone / tablet / PC)
 
+> **Superseded.** This document predates the 2026-11 audit fixes and contains outdated logins, backup and restore steps. For hosting, follow [HOSTING-DEDICATED-SERVER.md](HOSTING-DEDICATED-SERVER.md). Kept for history only.
+
 The HRMS is **Next.js** (`apps/web`, `0.0.0.0:3000`) + **NestJS** (`apps/api`, `0.0.0.0:3001`). The browser calls **same-origin** `/api/v1`, which Next rewrites to the API. One Cloudflare URL covers UI, API, uploads, and CORS.
 
 ## Start (public link)

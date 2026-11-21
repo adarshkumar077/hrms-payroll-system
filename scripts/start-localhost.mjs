@@ -11,7 +11,7 @@
  * Plain HTTP-only (no camera): npm run start:localhost:http
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,14 +22,18 @@ const urlFile = path.join(root, '.public-url.txt');
 const useHttps = process.env.EITF_WEB_HTTPS === '0' || process.argv.includes('--http') ? false : true;
 const INTERNAL_PORT = 3005;
 
+const CLOUDFLARED_URL =
+  'https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/';
+
+// Resolve cloudflared: PATH first, then the local deploy/bin copy. Returns null if neither exists.
 function cloudflaredBin() {
   const r = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['cloudflared'], {
     encoding: 'utf8',
     shell: true,
   });
   if (r.status === 0) return r.stdout.trim().split(/\r?\n/)[0];
-  const win = 'C:\\Program Files (x86)\\cloudflared\\cloudflared.exe';
-  return process.platform === 'win32' ? win : 'cloudflared';
+  const local = path.join(root, 'deploy', 'bin', process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared');
+  return existsSync(local) ? local : null;
 }
 
 function ensureWindowsFirewall() {
@@ -58,8 +62,7 @@ function ensureWindowsFirewall() {
   }
 }
 
-function startQuickTunnel(localOrigin) {
-  const bin = cloudflaredBin();
+function startQuickTunnel(localOrigin, bin) {
   const tunnel = spawn(
     bin,
     ['tunnel', '--url', localOrigin, '--no-tls-verify', '--no-autoupdate'],
@@ -123,6 +126,24 @@ function run(label, args, env = {}, opts = {}) {
 
 ensureWindowsFirewall();
 
+const cfBin = cloudflaredBin();
+if (!cfBin) {
+  console.error('cloudflared not found (needed for the public tunnel).');
+  console.error(`Install it from ${CLOUDFLARED_URL}`);
+  console.error('then re-run, or place the binary at deploy/bin/cloudflared(.exe).');
+  process.exit(1);
+}
+
+const certDir = path.join(root, 'apps', 'web', 'certificates');
+if (useHttps && !existsSync(path.join(certDir, 'localhost.pem'))) {
+  console.error('Missing HTTPS certificates in apps/web/certificates.');
+  console.error('Create them with mkcert (https://github.com/FiloSottile/mkcert):');
+  console.error('  mkcert -install');
+  console.error('  mkdir -p apps/web/certificates && cd apps/web/certificates && mkcert localhost && cd ../../..');
+  console.error('or run with plain HTTP: npm run start:localhost:http');
+  process.exit(1);
+}
+
 const lan = lanIp();
 
 console.log('\n=== EITF HRMS ===');
@@ -155,13 +176,13 @@ if (useHttps) {
       { cmd: process.execPath, shell: false },
     );
   }, 2500);
-  startQuickTunnel('https://127.0.0.1:3000');
+  startQuickTunnel('https://127.0.0.1:3000', cfBin);
 } else {
   run('web', ['run', 'dev:web:http'], {
     API_INTERNAL_URL: 'http://127.0.0.1:3001',
     HOSTNAME: '0.0.0.0',
   });
-  startQuickTunnel('http://127.0.0.1:3000');
+  startQuickTunnel('http://127.0.0.1:3000', cfBin);
 }
 
 function shutdown() {

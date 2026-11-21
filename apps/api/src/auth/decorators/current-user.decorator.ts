@@ -9,6 +9,8 @@ export type AuthUser = {
   roles: string[];
   employeeId?: string | null;
   moduleAccess: string[];
+  /** Loaded from the DB on every request; enforced by PasswordChangeGuard. */
+  forcePasswordChange?: boolean;
 };
 
 export const CurrentUser = createParamDecorator(

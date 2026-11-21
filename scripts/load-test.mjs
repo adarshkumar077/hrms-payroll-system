@@ -5,12 +5,16 @@
  *   node scripts/load-test.mjs [baseUrl] [concurrency]
  *   node scripts/load-test.mjs https://hrms.yourdomain.com 15
  *
- * Env: LOAD_TEST_USER, LOAD_TEST_PASS (default: superadmin / Super@123)
+ * Env: LOAD_TEST_USER, LOAD_TEST_PASS (required: a real admin login)
  */
 const base = (process.argv[2] || process.env.PUBLIC_APP_URL || 'http://localhost:8080').replace(/\/$/, '');
 const concurrency = Number(process.argv[3] || process.env.LOAD_TEST_CONCURRENCY || 15);
-const loginId = process.env.LOAD_TEST_USER || 'superadmin';
-const password = process.env.LOAD_TEST_PASS || 'Super@123';
+const loginId = process.env.LOAD_TEST_USER;
+const password = process.env.LOAD_TEST_PASS;
+if (!loginId || !password) {
+  console.error('Set LOAD_TEST_USER and LOAD_TEST_PASS to a real admin login (one that has changed its first password).');
+  process.exit(2);
+}
 
 async function timed(label, fn) {
   const t0 = performance.now();
@@ -66,12 +70,6 @@ async function main() {
     ['attendance-punch-out', () => fetch(`${base}/api/v1/me/attendance/mark`, { method: 'POST', headers, body: JSON.stringify({ type: 'OUT' }) }).then((r) => { if (!r.ok && r.status !== 409) throw new Error(String(r.status)); })],
     ['leave-balances', () => fetch(`${base}/api/v1/me/leave/balances`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
     ['payroll-runs', () => fetch(`${base}/api/v1/payroll/runs`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
-    ['crm-leads', () => fetch(`${base}/api/v1/crm/leads`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
-    ['crm-tasks', () => fetch(`${base}/api/v1/crm/tasks`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
-    ['crm-lead-create', () => fetch(`${base}/api/v1/crm/leads`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ name: `LoadTest ${Date.now()}`, phone: '9999999999', source: 'load-test' }),
-    }).then((r) => { if (!r.ok && r.status !== 403) throw new Error(String(r.status)); })],
     ['profile', () => fetch(`${base}/api/v1/me/profile`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
     ['notifications', () => fetch(`${base}/api/v1/notifications/mine`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
     ['web-home', () => fetch(`${base}/`).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],

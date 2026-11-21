@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, getStoredUser, getToken, getApiBaseUrl } from '@/lib/api';
+import { api, getStoredUser, getApiBaseUrl, authFetch } from '@/lib/api';
 
 
 
@@ -63,11 +63,8 @@ export default function CompliancePage() {
   async function exportReport(fmt: 'csv' | 'excel' | 'pdf') {
     setError('');
     try {
-      const token = getToken();
       const path = `/security/compliance/${kind}/export/${fmt}?year=${year}&month=${month}`;
-      const res = await fetch(`${getApiBaseUrl()}${path}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await authFetch(`${getApiBaseUrl()}${path}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { message?: string }).message ?? `Export failed (${res.status})`);

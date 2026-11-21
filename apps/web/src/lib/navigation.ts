@@ -56,7 +56,7 @@ export type NavItem = {
   children?: NavItem[];
 };
 
-/** HR Attendance & Payroll focused navigation — CRM removed. */
+/** HR Attendance & Payroll focused navigation. */
 export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Overview',
@@ -122,6 +122,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         children: [
           { id: 'payroll-runs', label: 'Payment Management', href: '/payroll', icon: 'payroll', adminRoles: ['SUPER_ADMIN', 'ADMIN', 'HR'] },
           { id: 'payroll-ctc', label: 'CTC Assignment', href: '/payroll/ctc', icon: 'payroll', adminRoles: ['SUPER_ADMIN', 'ADMIN', 'HR'] },
+          { id: 'payroll-statutory', label: 'Statutory Rules', href: '/payroll/statutory', icon: 'payroll', adminRoles: ['SUPER_ADMIN', 'ADMIN', 'HR'] },
           { id: 'payslips', label: 'My Payslips', href: '/payroll/payslips', icon: 'payroll', employee: true },
         ],
       },

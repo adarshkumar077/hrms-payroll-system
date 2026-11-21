@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { MoneySerializeInterceptor } from './common/money-serialize.interceptor';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { CompanyModule } from './company/company.module';
@@ -27,9 +28,9 @@ import { AdminModule } from './admin/admin.module';
 import { HelpDocsModule } from './help-docs/help-docs.module';
 import { StudioModule } from './studio/studio.module';
 import { DataExchangeModule } from './data-exchange/data-exchange.module';
-import { CrmModule } from './crm/crm.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
+import { PasswordChangeGuard } from './auth/guards/password-change.guard';
 import { IpAllowlistGuard } from './security/ip-allowlist.guard';
 import { Require2faGuard } from './security/require-2fa.guard';
 
@@ -60,13 +61,14 @@ import { Require2faGuard } from './security/require-2fa.guard';
     HelpDocsModule,
     StudioModule,
     DataExchangeModule,
-    CrmModule,
     HealthModule, // public /health for local + tunnel probes
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    { provide: APP_INTERCEPTOR, useClass: MoneySerializeInterceptor },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: PasswordChangeGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: IpAllowlistGuard },
     { provide: APP_GUARD, useClass: Require2faGuard },

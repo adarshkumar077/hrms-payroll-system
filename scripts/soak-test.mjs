@@ -10,8 +10,12 @@
 const base = (process.argv[2] || process.env.PUBLIC_APP_URL || 'http://localhost:8080').replace(/\/$/, '');
 const durationMin = Number(process.argv[3] || 60);
 const intervalSec = Number(process.argv[4] || 30);
-const loginId = process.env.LOAD_TEST_USER || 'superadmin';
-const password = process.env.LOAD_TEST_PASS || 'Super@123';
+const loginId = process.env.LOAD_TEST_USER;
+const password = process.env.LOAD_TEST_PASS;
+if (!loginId || !password) {
+  console.error('Set LOAD_TEST_USER and LOAD_TEST_PASS to a real admin login (one that has changed its first password).');
+  process.exit(2);
+}
 
 const endAt = Date.now() + durationMin * 60_000;
 let cycle = 0;
@@ -35,7 +39,6 @@ async function probe(token) {
     `${base}/api/v1/health`,
     `${base}/api/v1/dashboard/hr`,
     `${base}/api/v1/employees?take=20`,
-    `${base}/api/v1/crm/leads`,
     `${base}/`,
   ];
   for (const url of urls) {

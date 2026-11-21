@@ -35,9 +35,27 @@ import {
   SubmitReimbursementDto,
 } from './dto/money.dto';
 import {
+  buildEmiAmounts,
+  calcEmi,
+  calcEsdForMonth,
   calcPayrollPreview,
+  calcPayslipTotals,
+  calcProratedAmount,
   EmployeePayrollConfigJson,
+  normalizePayrollConfig,
+  PayrollPreview,
 } from './payroll-calculator';
+import { isIncentiveEligible, tallyMonthAttendance, type IncentiveRules } from './incentive';
+import {
+  PriorPayrollLine,
+  priorMonthsInEsiPeriod,
+  priorMonthsInFy,
+  summarizePriorPayroll,
+} from './statutory';
+import { StatutoryRulesService } from './statutory/statutory-rules.service';
+import * as M from '../common/money';
+
+type PayItem = { code: string; name: string; amount: number };
 
 @Injectable()
 export class PayrollService {
@@ -46,7 +64,50 @@ export class PayrollService {
     private readonly audit: AuditService,
     @Inject(forwardRef(() => WorkflowService))
     private readonly workflow: WorkflowService,
+    private readonly statutoryRules: StatutoryRulesService,
   ) {}
+
+  /** Read-only statutory rule tables (payroll settings screen). */
+  statutoryRulesView(companyId: string, financialYear?: string) {
+    return this.statutoryRules.view(companyId, financialYear);
+  }
+
+  /** Approved / locked payroll earlier in the FY, grouped by employee (for TDS projection + ESI period). */
+  private async priorPayrollByEmployee(companyId: string, year: number, month: number) {
+    const months = priorMonthsInFy(year, month);
+    const byEmp = new Map<string, PriorPayrollLine[]>();
+    if (!months.length) return byEmp;
+    const lines = await this.prisma.payrollLine.findMany({
+      where: {
+        companyId,
+        payrollRun: {
+          status: { in: [PayrollRunStatus.APPROVED, PayrollRunStatus.LOCKED] },
+          OR: months.map((m) => ({ year: m.year, month: m.month })),
+        },
+      },
+      select: {
+        employeeId: true,
+        earningsJson: true,
+        deductionsJson: true,
+        grossEarnings: true,
+        statutoryJson: true,
+        payrollRun: { select: { year: true, month: true } },
+      },
+    });
+    for (const l of lines) {
+      const list = byEmp.get(l.employeeId) ?? [];
+      list.push({
+        year: l.payrollRun.year,
+        month: l.payrollRun.month,
+        earnings: Array.isArray(l.earningsJson) ? (l.earningsJson as PayItem[]) : [],
+        deductions: Array.isArray(l.deductionsJson) ? (l.deductionsJson as PayItem[]) : [],
+        grossEarnings: l.grossEarnings,
+        statutory: (l.statutoryJson as PriorPayrollLine['statutory']) ?? null,
+      });
+      byEmp.set(l.employeeId, list);
+    }
+    return byEmp;
+  }
 
   private isFinance(user: AuthUser) {
     const roles: string[] = [RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN];
@@ -140,7 +201,7 @@ export class PayrollService {
         lines: {
           create: dto.lines.map((l) => ({
             componentId: l.componentId,
-            amount: l.amount,
+            amount: M.toDb(l.amount),
             percentOfBasic: l.percentOfBasic,
           })),
         },
@@ -173,12 +234,12 @@ export class PayrollService {
           companyId: user.companyId,
           employeeId: dto.employeeId,
           effectiveFrom: new Date(dto.effectiveFrom),
-          ctcAnnual: dto.ctcAnnual,
+          ctcAnnual: M.toDb(dto.ctcAnnual),
           notes: dto.notes,
           lines: {
             create: dto.lines.map((l) => ({
               componentId: l.componentId,
-              amount: l.amount,
+              amount: M.toDb(l.amount),
             })),
           },
         },
@@ -190,12 +251,12 @@ export class PayrollService {
           employeeId: dto.employeeId,
           effectiveFrom: new Date(dto.effectiveFrom),
           previousCtc: prev?.ctcAnnual,
-          newCtc: dto.ctcAnnual,
+          newCtc: M.toDb(dto.ctcAnnual),
           reason: dto.reason ?? 'Structure assigned',
           createdBy: user.id,
           snapshot: created.lines.map((l) => ({
             code: l.component.code,
-            amount: l.amount,
+            amount: M.toNumber(l.amount),
           })) as Prisma.InputJsonValue,
         },
       });
@@ -288,6 +349,23 @@ export class PayrollService {
     const incentiveEnabled = await this.setting(user.companyId, 'incentive.enabled', true);
     const incentiveAmount = await this.setting(user.companyId, 'incentive.amount', 0);
     const maxLate = await this.setting(user.companyId, 'incentive.max_late_marks', 0);
+    const incentiveRules: IncentiveRules = {
+      enabled: incentiveEnabled,
+      amount: incentiveAmount,
+      maxLateMarks: maxLate,
+      requireNoHalfDay: await this.setting(user.companyId, 'incentive.require_no_half_day', true),
+      requireNoAbsent: await this.setting(user.companyId, 'incentive.require_no_absent', true),
+      requireNoUlob: await this.setting(user.companyId, 'incentive.require_no_ulob', true),
+    };
+
+    // Statutory rule tables for the run's FY and what was already paid earlier in the FY.
+    const { rules: statutoryRules } = await this.statutoryRules.getRulesForMonth(
+      user.companyId,
+      dto.year,
+      dto.month,
+    );
+    const priorByEmp = await this.priorPayrollByEmployee(user.companyId, dto.year, dto.month);
+    const esiPeriodMonths = priorMonthsInEsiPeriod(dto.year, dto.month);
 
     const run = await this.prisma.$transaction(async (tx) => {
       const payroll =
@@ -324,42 +402,34 @@ export class PayrollService {
         const lopDays =
           attendance.filter((a) => lopStatuses.includes(a.status)).length +
           attendance.filter((a) => a.status === AttendanceDayStatus.HD).length * 0.5;
-        const counter = await tx.employeeAttendanceCounter.findUnique({
-          where: { employeeId: emp.id },
-        });
 
-        const earnings: { code: string; name: string; amount: number }[] = [];
-        const deductions: { code: string; name: string; amount: number }[] = [];
+        // Every line item amount is rounded HALF_UP to 2dp when it is added; totals are
+        // exact Decimal sums of those rounded lines, so gross − deductions = net to the paisa.
+        const earnings: PayItem[] = [];
+        const deductions: PayItem[] = [];
+        const item = (code: string, name: string, amount: M.MoneyInput): PayItem => ({
+          code,
+          name,
+          amount: M.toNumber(amount),
+        });
 
         const payrollCfg = await tx.employeePayrollConfig.findUnique({
           where: { employeeId: emp.id },
         });
 
-        if (payrollCfg) {
-          const cfg = payrollCfg.configJson as EmployeePayrollConfigJson;
-          const preview = calcPayrollPreview({
-            grossMonthly: payrollCfg.grossMonthly,
-            config: cfg,
-          });
-          if (preview.pf > 0) {
-            deductions.push({ code: 'PF', name: 'Provident Fund', amount: preview.pf });
-          }
-          if (preview.tds > 0) {
-            deductions.push({ code: 'TDS', name: 'TDS', amount: preview.tds });
-          }
-          if (preview.esd > 0) {
-            deductions.push({ code: 'ESD', name: 'Security Deposit', amount: preview.esd });
-          }
-          if (preview.professionalTax > 0) {
-            deductions.push({ code: 'PT', name: 'Professional Tax', amount: preview.professionalTax });
+        const cfg = payrollCfg
+          ? normalizePayrollConfig(payrollCfg.configJson as EmployeePayrollConfigJson)
+          : null;
+        if (payrollCfg && cfg) {
+          // ESD comes from the employee config; PF / ESI / TDS / PT are computed below, once every
+          // taxable earning (incentive) and LOP for the month is known.
+          const esdThisMonth = calcEsdForMonth(cfg.deductions.esd).amount;
+          if (esdThisMonth > 0) {
+            deductions.push({ code: 'ESD', name: 'Security Deposit', amount: esdThisMonth });
           }
           for (const custom of cfg.deductions.custom ?? []) {
-            if (custom.amount > 0) {
-              deductions.push({
-                code: 'CUSTOM',
-                name: custom.name,
-                amount: Math.round(custom.amount),
-              });
+            if (M.money(custom.amount).greaterThan(0)) {
+              deductions.push(item('CUSTOM', custom.name, custom.amount));
             }
           }
           const allowanceCodes: Record<string, { code: string; name: string; key: keyof typeof cfg.allowances }> = {
@@ -373,54 +443,52 @@ export class PayrollService {
             incentive: { code: 'INCENTIVE', name: 'Incentive', key: 'incentive' },
             special: { code: 'SPECIAL', name: 'Special Allowance', key: 'special' },
           };
+          // Configured monthly gross is a salary line in its own right (allowances are added on
+          // top), exactly as calcPayrollPreview shows it to HR. Previously it was never paid, so
+          // gross-only employees got ~₹0 earnings.
+          if (M.money(payrollCfg.grossMonthly).greaterThan(0)) {
+            earnings.push(item('SALARY', 'Salary', M.round2(payrollCfg.grossMonthly)));
+          }
           for (const meta of Object.values(allowanceCodes)) {
             const amt = cfg.allowances[meta.key];
             if (typeof amt === 'number' && amt > 0) {
-              earnings.push({ code: meta.code, name: meta.name, amount: amt });
+              earnings.push(item(meta.code, meta.name, amt));
             }
           }
           for (const custom of cfg.allowances.custom ?? []) {
-            if (custom.amount > 0) {
-              earnings.push({ code: 'CUSTOM_EARN', name: custom.name, amount: custom.amount });
+            if (M.money(custom.amount).greaterThan(0)) {
+              earnings.push(item('CUSTOM_EARN', custom.name, custom.amount));
             }
           }
         } else if (structure) {
           for (const line of structure.lines) {
-            const item = {
-              code: line.component.code,
-              name: line.component.name,
-              amount: line.amount,
-            };
-            if (line.component.type === SalaryComponentType.EARNING) earnings.push(item);
-            else deductions.push({ ...item });
+            const it = item(line.component.code, line.component.name, line.amount);
+            if (line.component.type === SalaryComponentType.EARNING) earnings.push(it);
+            else deductions.push(it);
           }
         } else {
-          earnings.push({ code: 'BASIC', name: 'Basic', amount: 0 });
+          earnings.push(item('BASIC', 'Basic', 0));
         }
 
-        // LOP deduction proportional to basic
+        // LOP deduction: lopBase × lopDays ÷ calendar days, rounded once. lopBase is Basic when
+        // set, otherwise the configured gross salary line (same fallback as the PF wage).
         const basic = earnings.find((e) => e.code === 'BASIC')?.amount ?? 0;
-        if (lopDays > 0 && basic > 0) {
-          const lopAmt = Math.round((basic / workingDaysApprox) * lopDays);
-          deductions.push({ code: 'LOP', name: 'Loss of Pay', amount: lopAmt });
+        const lopBase = basic > 0 ? basic : (earnings.find((e) => e.code === 'SALARY')?.amount ?? 0);
+        if (lopDays > 0 && lopBase > 0) {
+          const lopAmt = calcProratedAmount(lopBase, lopDays, workingDaysApprox);
+          deductions.push(item('LOP', 'Loss of Pay', lopAmt));
         }
 
-        // Incentive
-        if (
-          incentiveEnabled &&
-          incentiveAmount > 0 &&
-          (counter?.lateMarkCount ?? 0) <= maxLate
-        ) {
-          earnings.push({
-            code: 'INCENTIVE',
-            name: 'Attendance Incentive',
-            amount: incentiveAmount,
-          });
+        // Incentive: judged on this month's attendance (late marks, absences, half days, ULOB)
+        // against every incentive.* rule — not the running late counter, which resets on
+        // late→HD conversion and ignored absences entirely.
+        if (isIncentiveEligible(tallyMonthAttendance(attendance), incentiveRules)) {
+          earnings.push(item('INCENTIVE', 'Attendance Incentive', incentiveAmount));
         }
 
         // ESD (company default — skip when employee payroll config handles it)
         if (!payrollCfg && esdEnabled && esdAmount > 0) {
-          deductions.push({ code: 'ESD', name: 'Security Deposit', amount: esdAmount });
+          deductions.push(item('ESD', 'Security Deposit', esdAmount));
         }
 
         // Loan EMI
@@ -435,20 +503,17 @@ export class PayrollService {
             },
           },
         });
-        let loanEmi = 0;
-        for (const loan of loans) {
-          for (const emi of loan.emis) loanEmi += emi.amount;
-        }
-        if (loanEmi > 0) {
-          deductions.push({ code: 'LOAN_EMI', name: 'Loan/Advance EMI', amount: loanEmi });
+        const loanEmi = M.sum(loans.flatMap((loan) => loan.emis.map((emi) => emi.amount)));
+        if (loanEmi.greaterThan(0)) {
+          deductions.push(item('LOAN_EMI', 'Loan/Advance EMI', loanEmi));
         }
 
         const damages = await tx.assetDamageCharge.findMany({
           where: { employeeId: emp.id, status: DamageChargeStatus.PENDING },
         });
-        const damageTotal = damages.reduce((s, d) => s + d.amount, 0);
-        if (damageTotal > 0) {
-          deductions.push({ code: 'ASSET_DAMAGE', name: 'Asset Damage', amount: damageTotal });
+        const damageTotal = M.sumBy(damages, (d) => d.amount);
+        if (damageTotal.greaterThan(0)) {
+          deductions.push(item('ASSET_DAMAGE', 'Asset Damage', damageTotal));
         }
 
         // Approved reimbursements not yet paid
@@ -459,14 +524,63 @@ export class PayrollService {
             paidInPayrollId: null,
           },
         });
-        const reimbTotal = reimbursements.reduce((s, r) => s + r.amount, 0);
-        if (reimbTotal > 0) {
-          earnings.push({ code: 'REIMB', name: 'Reimbursement', amount: reimbTotal });
+        const reimbTotal = M.sumBy(reimbursements, (r) => r.amount);
+        if (reimbTotal.greaterThan(0)) {
+          earnings.push(item('REIMB', 'Reimbursement', reimbTotal));
         }
 
-        const gross = earnings.reduce((s, e) => s + e.amount, 0);
-        const ded = deductions.reduce((s, d) => s + d.amount, 0);
-        const net = Math.max(0, Math.round((gross - ded) * 100) / 100);
+        // Statutory deductions (PF / ESI / TDS / PT) for config-based employees. Each follows the
+        // employee's toggle: off, manual fixed / percent override, or the statutory engine.
+        let statutory: PayrollPreview | null = null;
+        if (payrollCfg && cfg) {
+          const lopAmount = M.sumBy(
+            deductions.filter((d) => d.code === 'LOP'),
+            (d) => d.amount,
+          );
+          const taxableEarnings = M.sumBy(
+            earnings.filter((e) => e.code !== 'REIMB'),
+            (e) => e.amount,
+          );
+          // Same base as the salary preview: configured gross + allowances (+ incentive) − LOP.
+          const monthlyGross = M.nonNegative(
+            // taxableEarnings already contains the SALARY (configured gross) line.
+            M.sub(taxableEarnings, lopAmount),
+          );
+          const pfWage =
+            basic > 0
+              ? M.nonNegative(M.sub(basic, lopAmount))
+              : M.nonNegative(M.sub(M.round2(payrollCfg.grossMonthly), lopAmount));
+          const prior = summarizePriorPayroll(priorByEmp.get(emp.id) ?? [], esiPeriodMonths);
+          statutory = calcPayrollPreview({
+            grossMonthly: payrollCfg.grossMonthly,
+            config: cfg,
+            statutory: {
+              rules: statutoryRules,
+              year: dto.year,
+              month: dto.month,
+              taxRegime: emp.taxRegime,
+              declaredDeductions: emp.oldRegimeDeclaredDeductions ?? 0,
+              ptState: emp.ptState,
+              gender: emp.gender,
+              monthlyGross,
+              pfWage,
+              priorTaxableGross: prior.priorTaxableGross,
+              priorTdsDeducted: prior.priorTdsDeducted,
+              priorProfessionalTax: prior.priorProfessionalTax,
+              esiPeriodEligible: prior.esiPeriodEligible,
+            },
+          });
+          const statutoryItems: PayItem[] = [];
+          if (statutory.pf > 0) statutoryItems.push(item('PF', 'Provident Fund', statutory.pf));
+          if (statutory.esi > 0) statutoryItems.push(item('ESI', 'ESI (Employee)', statutory.esi));
+          if (statutory.tds > 0) statutoryItems.push(item('TDS', 'TDS', statutory.tds));
+          if (statutory.professionalTax > 0) {
+            statutoryItems.push(item('PT', 'Professional Tax', statutory.professionalTax));
+          }
+          deductions.unshift(...statutoryItems);
+        }
+
+        const { gross, totalDeductions: ded, net } = calcPayslipTotals(earnings, deductions);
 
         await tx.payrollLine.create({
           data: {
@@ -475,11 +589,17 @@ export class PayrollService {
             employeeId: emp.id,
             earningsJson: earnings,
             deductionsJson: deductions,
-            grossEarnings: gross,
-            totalDeductions: ded,
-            netPay: net,
+            grossEarnings: M.toDb(gross),
+            totalDeductions: M.toDb(ded),
+            netPay: M.toDb(net),
             attendanceDays: presentDays,
             lopDays,
+            employerPfEps: M.toDb(statutory?.employerPfEps ?? 0),
+            employerPfEpf: M.toDb(statutory?.employerPfEpf ?? 0),
+            employerEsi: M.toDb(statutory?.employerEsi ?? 0),
+            statutoryJson: statutory
+              ? (statutory.statutory as unknown as Prisma.InputJsonValue)
+              : Prisma.JsonNull,
           },
         });
       }
@@ -537,21 +657,23 @@ export class PayrollService {
             },
           });
           for (const loan of loans) {
-            let recovered = 0;
+            let recovered = M.money(0);
             for (const emi of loan.emis) {
               await tx.loanEmiSchedule.update({
                 where: { id: emi.id },
                 data: { paidAt: new Date() },
               });
-              recovered += emi.amount;
+              recovered = recovered.plus(emi.amount);
             }
-            if (recovered > 0) {
-              const outstanding = Math.max(0, loan.outstanding - recovered);
+            if (recovered.greaterThan(0)) {
+              const outstanding = M.toDb(M.nonNegative(M.sub(loan.outstanding, recovered)));
               await tx.loanAdvance.update({
                 where: { id: loan.id },
                 data: {
                   outstanding,
-                  status: outstanding <= 0 ? LoanAdvanceStatus.CLOSED : LoanAdvanceStatus.ACTIVE,
+                  status: outstanding.lessThanOrEqualTo(0)
+                    ? LoanAdvanceStatus.CLOSED
+                    : LoanAdvanceStatus.ACTIVE,
                 },
               });
               await tx.loanRecoveryEntry.create({
@@ -559,7 +681,7 @@ export class PayrollService {
                   loanAdvanceId: loan.id,
                   year,
                   month,
-                  amount: recovered,
+                  amount: M.toDb(recovered),
                   payrollRunId: run.id,
                   note: 'Auto payroll recovery',
                 },
@@ -574,32 +696,33 @@ export class PayrollService {
             where: { employeeId: line.employeeId },
             orderBy: { createdAt: 'desc' },
           });
-          let bal = last?.balanceAfter ?? 0;
-          bal += esdAmount;
+          const deposit = M.round2(esdAmount);
+          let bal = M.money(last?.balanceAfter).plus(deposit);
           await tx.esdLedgerEntry.create({
             data: {
               companyId: user.companyId,
               employeeId: line.employeeId,
               entryType: EsdEntryType.DEPOSIT,
-              amount: esdAmount,
-              balanceAfter: bal,
+              amount: deposit,
+              balanceAfter: M.toDb(bal),
               year,
               month,
               note: 'Monthly ESD via payroll',
               createdBy: user.id,
             },
           });
-          if (interestRate > 0 && bal > 0) {
-            const interest = Math.round(((bal * interestRate) / 100 / 12) * 100) / 100;
-            if (interest > 0) {
-              bal += interest;
+          if (interestRate > 0 && bal.greaterThan(0)) {
+            // Monthly interest = balance × annual% ÷ 12, rounded HALF_UP to 2dp.
+            const interest = M.round2(M.div(M.percentOf(bal, interestRate), 12));
+            if (interest.greaterThan(0)) {
+              bal = bal.plus(interest);
               await tx.esdLedgerEntry.create({
                 data: {
                   companyId: user.companyId,
                   employeeId: line.employeeId,
                   entryType: EsdEntryType.INTEREST,
                   amount: interest,
-                  balanceAfter: bal,
+                  balanceAfter: M.toDb(bal),
                   year,
                   month,
                   note: 'Monthly compounded interest',
@@ -713,7 +836,7 @@ export class PayrollService {
       action: AuditAction.UPDATE,
       entityType: 'PayrollLine',
       entityId: lineId,
-      metadata: { event: 'marked_paid', amount: line.netPay },
+      metadata: { event: 'marked_paid', amount: M.toNumber(line.netPay) },
     });
 
     return updated;
@@ -754,14 +877,9 @@ export class PayrollService {
   async requestLoan(user: AuthUser, dto: RequestLoanDto) {
     if (!user.employeeId) throw new ForbiddenException();
     const rate = dto.interestRate ?? 0;
-    const principal = dto.amount;
+    const principal = M.toDb(dto.amount);
     const n = dto.tenureMonths;
-    const r = rate / 100 / 12;
-    const emi =
-      r === 0
-        ? Math.round((principal / n) * 100) / 100
-        : Math.round(((principal * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1)) * 100) /
-          100;
+    const emi = M.toDb(calcEmi(principal, rate, n));
 
     const loan = await this.prisma.loanAdvance.create({
       data: {
@@ -785,7 +903,7 @@ export class PayrollService {
         entityType: 'LoanAdvance',
         entityId: loan.id,
         requesterId: user.employeeId,
-        summary: `${dto.type} ${principal}`,
+        summary: `${dto.type} ${M.toFixed2(principal)}`,
       });
     } catch {
       // non-fatal
@@ -845,16 +963,21 @@ export class PayrollService {
     }
 
     const now = new Date();
-    const emis = [];
-    for (let i = 0; i < loan.tenureMonths; i++) {
+    // Interest-free loans: last installment absorbs the paise remainder so the loan closes at 0.
+    const emis = buildEmiAmounts({
+      principal: loan.amount,
+      emiAmount: loan.emiAmount,
+      tenureMonths: loan.tenureMonths,
+      interestRate: loan.interestRate,
+    }).map((amount, i) => {
       const d = new Date(now.getFullYear(), now.getMonth() + i + 1, 1);
-      emis.push({
+      return {
         installmentNo: i + 1,
         dueYear: d.getFullYear(),
         dueMonth: d.getMonth() + 1,
-        amount: loan.emiAmount,
-      });
-    }
+        amount,
+      };
+    });
 
     const activated = await this.prisma.loanAdvance.update({
       where: { id },
@@ -901,7 +1024,7 @@ export class PayrollService {
         companyId: user.companyId,
         employeeId: user.employeeId,
         category: dto.category,
-        amount: dto.amount,
+        amount: M.toDb(dto.amount),
         description: dto.description,
         receiptUrl: dto.receiptUrl,
       },
@@ -913,7 +1036,7 @@ export class PayrollService {
         entityType: 'ReimbursementClaim',
         entityId: claim.id,
         requesterId: user.employeeId,
-        summary: `${dto.category} ${dto.amount}`,
+        summary: `${dto.category} ${M.toFixed2(dto.amount)}`,
       });
     } catch {
       // non-fatal

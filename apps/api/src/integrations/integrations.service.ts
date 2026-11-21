@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { encryptSecret } from '../common/secret-crypto';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
+import * as M from '../common/money';
 
 const DEFAULT_PROVIDERS: IntegrationProvider[] = [
   IntegrationProvider.EMAIL,
@@ -191,9 +192,9 @@ export class IntegrationsService {
     const journal = run.lines.map((l) => ({
       employeeCode: l.employee.employeeCode,
       name: `${l.employee.firstName} ${l.employee.lastName ?? ''}`.trim(),
-      debitSalary: l.grossEarnings,
-      creditBank: l.netPay,
-      deductions: l.totalDeductions,
+      debitSalary: M.toNumber(l.grossEarnings),
+      creditBank: M.toNumber(l.netPay),
+      deductions: M.toNumber(l.totalDeductions),
       voucherType: 'Payroll',
     }));
     const payload = {

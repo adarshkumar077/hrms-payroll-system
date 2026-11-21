@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoleCode } from '@prisma/client';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -63,6 +63,13 @@ export class PayrollController {
   @Roles(RoleCode.SUPER_ADMIN)
   revisions(@CurrentUser() user: AuthUser, @Param('employeeId') employeeId: string) {
     return this.payroll.revisions(user.companyId, employeeId);
+  }
+
+  /** Read-only statutory rule tables (income-tax slabs, PF, ESI, PT) for a financial year. */
+  @Get('payroll/statutory-rules')
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN)
+  statutoryRules(@CurrentUser() user: AuthUser, @Query('financialYear') financialYear?: string) {
+    return this.payroll.statutoryRulesView(user.companyId, financialYear);
   }
 
   // Payroll runs — CEO only

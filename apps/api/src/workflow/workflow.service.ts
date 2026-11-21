@@ -22,6 +22,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
 import { ActApprovalDto, ConfigureWorkflowDto } from './dto/workflow.dto';
+import { buildEmiAmounts } from '../payroll/payroll-calculator';
 
 const DEFAULTS: {
   type: WorkflowType;
@@ -602,16 +603,21 @@ export class WorkflowService {
     }
 
     const now = new Date();
-    const emis = [];
-    for (let i = 0; i < loan.tenureMonths; i++) {
+    // Interest-free loans: last installment absorbs the paise remainder so the loan closes at 0.
+    const emis = buildEmiAmounts({
+      principal: loan.amount,
+      emiAmount: loan.emiAmount,
+      tenureMonths: loan.tenureMonths,
+      interestRate: loan.interestRate,
+    }).map((amount, i) => {
       const d = new Date(now.getFullYear(), now.getMonth() + i + 1, 1);
-      emis.push({
+      return {
         installmentNo: i + 1,
         dueYear: d.getFullYear(),
         dueMonth: d.getMonth() + 1,
-        amount: loan.emiAmount,
-      });
-    }
+        amount,
+      };
+    });
     await this.prisma.loanAdvance.update({
       where: { id },
       data: {

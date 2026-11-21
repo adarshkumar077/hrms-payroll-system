@@ -27,4 +27,4 @@ for ($i = 0; $i -lt 60; $i++) {
 if ($ok) { Write-Host "Healthy: $base/api/v1/health" }
 else { Write-Warning 'Health check not ready — run: docker compose logs -f api nginx' }
 
-Write-Host "Login: superadmin / Super@123"
+Write-Host "Login: BOOTSTRAP_ADMIN_EMAIL from .env.production (password change required at first login)"

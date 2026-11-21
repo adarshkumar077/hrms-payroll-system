@@ -7,6 +7,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import {
   AttendanceDayStatus,
   AttendanceMethod,
@@ -16,6 +17,16 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { StorageService } from '../documents/storage.service';
+import {
+  SELFIE_URL_TTL_SECONDS,
+  buildSelfieKey,
+  decodeSelfieDataUrl,
+  isDataImageUrl,
+  isStorageRef,
+  mapSelfieUrls,
+  SELFIE_KEY_PREFIX,
+} from './selfie-storage';
 import { AuthUser } from '../auth/decorators/current-user.decorator';
 import {
   BiometricWebhookDto,
@@ -33,6 +44,7 @@ import {
   normalizePayrollConfig,
   type EmployeePayrollConfigJson,
 } from '../payroll/payroll-calculator';
+import * as M from '../common/money';
 import { buildAttendancePayrollWorkbook } from './attendance-payroll-export';
 import {
   buildMapsUrl,
@@ -90,7 +102,8 @@ function haversineM(lat1: number, lon1: number, lat2: number, lon2: number) {
 }
 
 function recordSnapshot(record: Record<string, unknown>) {
-  return JSON.stringify(record);
+  // Money columns are Prisma.Decimal — snapshot them as 2dp numbers, not strings.
+  return JSON.stringify(M.serializeMoney(record));
 }
 
 @Injectable()
@@ -100,7 +113,41 @@ export class AttendanceService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly storage: StorageService,
   ) {}
+
+  /**
+   * Turn an incoming selfie value into what the DB stores. Base64 data URLs are validated and
+   * uploaded (-> `storage:<key>`); client-supplied `storage:` refs are rejected so a caller can't
+   * point a record at another tenant's object.
+   */
+  private async ingestSelfie(opts: {
+    companyId: string;
+    recordId: string;
+    punchType: 'IN' | 'OUT';
+    at: Date;
+    value: string | null | undefined;
+  }): Promise<string | undefined> {
+    const v = opts.value;
+    if (v == null) return undefined;
+    if (isStorageRef(v)) throw new BadRequestException('Invalid selfie value');
+    if (!isDataImageUrl(v)) return v;
+    const { buffer, mime } = decodeSelfieDataUrl(v);
+    const key = buildSelfieKey({
+      companyId: opts.companyId,
+      recordId: opts.recordId,
+      punchType: opts.punchType,
+      at: opts.at,
+      mime,
+    });
+    await this.storage.put(key, buffer, mime);
+    return `${SELFIE_KEY_PREFIX}${key}`;
+  }
+
+  /** Map stored `storage:` selfie keys to short-lived signed URLs (call AFTER privacy sanitizing). */
+  private withSignedSelfies<T>(record: T): Promise<T> {
+    return mapSelfieUrls(record, (key) => this.storage.signedUrl(key, SELFIE_URL_TTL_SECONDS));
+  }
 
   async onModuleInit() {
     try {
@@ -258,7 +305,7 @@ export class AttendanceService implements OnModuleInit {
     return {
       ...result,
       // Own punch: include saved GPS so the client can confirm location was stored
-      record: sanitizeAttendanceRecord(result.record, true),
+      record: await this.withSignedSelfies(sanitizeAttendanceRecord(result.record, true)),
     };
   }
 
@@ -391,6 +438,17 @@ export class AttendanceService implements OnModuleInit {
         ? (opts?.checkOutSource ??
           (opts?.skipEnterprise ? undefined : CHECK_OUT_SOURCE.MANUAL_OUT))
         : undefined;
+
+    if (dto.selfieUrl != null) {
+      const stored = await this.ingestSelfie({
+        companyId,
+        recordId: record?.id ?? randomUUID(),
+        punchType,
+        at: punchedAt,
+        value: dto.selfieUrl,
+      });
+      dto = { ...dto, selfieUrl: stored };
+    }
 
     const workStart = await this.setting<string>(companyId, 'office.work_start', '10:15');
     const grace = await this.setting<number>(companyId, 'office.grace_minutes', 0);
@@ -1099,7 +1157,7 @@ export class AttendanceService implements OnModuleInit {
       grossMonthly: number;
     }[] = [];
 
-    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    const round2 = M.toNumber;
 
     for (const emp of employees) {
       // Own sheet (or HR): show GPS location captured at check-in/out
@@ -1185,7 +1243,7 @@ export class AttendanceService implements OnModuleInit {
           );
         }
 
-        if (todaysEarnings != null) runningTotal = round2(runningTotal + todaysEarnings);
+        if (todaysEarnings != null) runningTotal = round2(M.add(runningTotal, todaysEarnings));
 
         rows.push({
           employeeId: emp.id,
@@ -1284,12 +1342,12 @@ export class AttendanceService implements OnModuleInit {
       where: { employeeId: { in: empIds } },
     });
     const payrollByEmp = new Map(payrollConfigs.map((c) => [c.employeeId, c]));
-    const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    const r2 = M.toNumber;
 
     const employees = empIds.map((id) => {
       const sample = sheet.rows.find((r) => r.employeeId === id)!;
       const cfg = payrollByEmp.get(id);
-      const grossMonthly = sample.grossMonthly || cfg?.grossMonthly || 0;
+      const grossMonthly = sample.grossMonthly || M.toNumber(cfg?.grossMonthly);
       const dailySalary = calcDailySalary(grossMonthly, calendarDays);
       let pf = 0;
       let esd = 0;
@@ -1310,7 +1368,8 @@ export class AttendanceService implements OnModuleInit {
           esd = preview.esd;
           tds = preview.tds;
           professionalTax = preview.professionalTax;
-          otherDeductions = r2(preview.otherDeductions + preview.professionalTax);
+          // ESI (employee) has no column of its own in the export, so it is counted with other deductions.
+          otherDeductions = r2(M.add(preview.otherDeductions, preview.professionalTax, preview.esi));
           esdRemainingBalance = preview.esdRemainingBalance;
           esdDeductedToDate = config.deductions.esd.deductedToDate ?? 0;
           esdEnabled = !!config.deductions.esd.enabled;
@@ -1429,7 +1488,7 @@ export class AttendanceService implements OnModuleInit {
     });
     const gross = payrollCfg?.grossMonthly ?? 0;
     const dailySalary = calcDailySalary(gross, daysInMonth);
-    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    const round2 = M.toNumber;
 
     /** Statuses the late-cycle may set to HD / restore to L or P */
     const cycleMutable = new Set<AttendanceDayStatus>([
@@ -1478,7 +1537,7 @@ export class AttendanceService implements OnModuleInit {
         }
       }
 
-      let todaysEarnings = rec.todaysEarnings;
+      let todaysEarnings = M.toNumberOrNull(rec.todaysEarnings);
       if (rec.checkInAt && rec.checkOutAt) {
         todaysEarnings = round2(calcDailyEarning(nextStatus, dailySalary).amount);
       } else if (
@@ -1494,8 +1553,7 @@ export class AttendanceService implements OnModuleInit {
       const statusChanged = nextStatus !== rec.status;
       const earnChanged =
         todaysEarnings != null &&
-        (rec.todaysEarnings == null ||
-          Math.abs((rec.todaysEarnings ?? 0) - todaysEarnings) > 0.001);
+        (rec.todaysEarnings == null || !M.round2(rec.todaysEarnings).equals(M.round2(todaysEarnings)));
 
       if (statusChanged || earnChanged) {
         await this.prisma.attendanceRecord.update({
@@ -1579,7 +1637,9 @@ export class AttendanceService implements OnModuleInit {
       },
     });
 
-    const safeRecord = record ? sanitizeAttendanceRecord(record, showGeo) : null;
+    const safeRecord = record
+      ? await this.withSignedSelfies(sanitizeAttendanceRecord(record, showGeo))
+      : null;
     const outLabel = checkOutSourceLabel(record?.checkOutSource);
 
     return {
@@ -1685,8 +1745,24 @@ export class AttendanceService implements OnModuleInit {
     if (dto.checkOutAddress != null) extra.checkOutAddress = dto.checkOutAddress;
     if (dto.checkInMapsUrl != null) extra.checkInMapsUrl = dto.checkInMapsUrl;
     if (dto.checkOutMapsUrl != null) extra.checkOutMapsUrl = dto.checkOutMapsUrl;
-    if (dto.checkInSelfieUrl != null) extra.checkInSelfieUrl = dto.checkInSelfieUrl;
-    if (dto.checkOutSelfieUrl != null) extra.checkOutSelfieUrl = dto.checkOutSelfieUrl;
+    if (dto.checkInSelfieUrl != null) {
+      extra.checkInSelfieUrl = await this.ingestSelfie({
+        companyId: user.companyId,
+        recordId: existing?.id ?? randomUUID(),
+        punchType: 'IN',
+        at: day,
+        value: dto.checkInSelfieUrl,
+      });
+    }
+    if (dto.checkOutSelfieUrl != null) {
+      extra.checkOutSelfieUrl = await this.ingestSelfie({
+        companyId: user.companyId,
+        recordId: existing?.id ?? randomUUID(),
+        punchType: 'OUT',
+        at: day,
+        value: dto.checkOutSelfieUrl,
+      });
+    }
     if (dto.checkOutAt) extra.checkOutSource = CHECK_OUT_SOURCE.HR_MANUAL;
     if (dto.method != null) extra.method = dto.method;
     if (dto.checkInAt) extra.checkInAt = new Date(dto.checkInAt);
@@ -1765,7 +1841,7 @@ export class AttendanceService implements OnModuleInit {
       day.getUTCMonth() + 1,
     );
     const refreshed = await this.prisma.attendanceRecord.findUnique({ where: { id: record.id } });
-    return sanitizeAttendanceRecord(refreshed ?? record, true);
+    return this.withSignedSelfies(sanitizeAttendanceRecord(refreshed ?? record, true));
   }
 
   async counters(companyId: string) {
@@ -1789,7 +1865,9 @@ export class AttendanceService implements OnModuleInit {
       'integrations.biometric_webhook_secret',
       '',
     );
-    if (!expectedSecret || dto.secret !== expectedSecret) {
+    const a = Buffer.from(String(dto.secret ?? ''));
+    const b = Buffer.from(String(expectedSecret));
+    if (!expectedSecret || a.length !== b.length || !timingSafeEqual(a, b)) {
       throw new ForbiddenException('Invalid biometric webhook secret');
     }
 
@@ -1836,10 +1914,14 @@ export class AttendanceService implements OnModuleInit {
     });
     const map = new Map(records.map((r) => [r.employeeId, r]));
     const privileged = this.isHr(user);
-    return team.map((t) => ({
-      employee: t,
-      record: map.get(t.id) ? sanitizeAttendanceRecord(map.get(t.id)!, privileged) : null,
-    }));
+    return Promise.all(
+      team.map(async (t) => ({
+        employee: t,
+        record: map.get(t.id)
+          ? await this.withSignedSelfies(sanitizeAttendanceRecord(map.get(t.id)!, privileged))
+          : null,
+      })),
+    );
   }
 
   /**

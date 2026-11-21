@@ -106,14 +106,8 @@ model Company {
   rolePermissions       RolePermission[]
   loginLogs             LoginLog[]
   userDevices           UserDevice[]
-  crmCustomers          CrmCustomer[]
-  crmLeads              CrmLead[]
-  crmDeals              CrmDeal[]
-  crmFollowUps          CrmFollowUp[]
-  crmNotes              CrmNote[]
-  crmTasks              CrmTask[]
-  crmActivityLogs       CrmActivityLog[]
   loginSessions         LoginSession[]
+  statutoryRuleSets     StatutoryRuleSet[]
 
   @@map("companies")
 }
@@ -316,6 +310,11 @@ enum DocumentTypeCode {
   CUSTOM
 }
 
+enum TaxRegime {
+  NEW
+  OLD
+}
+
 model Employee {
   id             String           @id @default(cuid())
   companyId      String           @map("company_id")
@@ -342,6 +341,12 @@ model Employee {
   department     String?
   designation    String?
   reportingToId  String?          @map("reporting_to_id")
+  /// Income-tax regime chosen by the employee for TDS (default NEW).
+  taxRegime      TaxRegime        @default(NEW) @map("tax_regime")
+  /// Old regime only: declared annual Chapter VI-A deductions (80C, 80D, …) as one total.
+  oldRegimeDeclaredDeductions Decimal? @map("old_regime_declared_deductions") @db.Decimal(14, 2)
+  /// Professional-tax state code (MH, KA, WB, TN, TS, AP, GJ, NONE). Null = NONE.
+  ptState        String?          @map("pt_state")
   createdAt      DateTime         @default(now()) @map("created_at")
   updatedAt      DateTime         @updatedAt @map("updated_at")
 
@@ -390,15 +395,6 @@ model Employee {
   ticketsAssigned   Ticket[] @relation("TicketAssignee")
   ticketComments    TicketComment[]
   notifications     Notification[]
-  crmLeadsOwned     CrmLead[] @relation("CrmLeadOwner")
-  crmDealsOwned     CrmDeal[] @relation("CrmDealOwner")
-  crmCustomersOwned CrmCustomer[] @relation("CrmCustomerOwner")
-  crmFollowUpsOwned CrmFollowUp[] @relation("CrmFollowUpOwner")
-  crmNotesAuthored  CrmNote[] @relation("CrmNoteAuthor")
-  crmTasksAssigned  CrmTask[] @relation("CrmTaskAssignee")
-  crmTasksCreated   CrmTask[] @relation("CrmTaskAssigner")
-  crmTaskComments   CrmTaskComment[]
-  crmActivities     CrmActivityLog[]
 
   @@unique([companyId, employeeCode])
   @@index([companyId, isActive])
@@ -737,7 +733,7 @@ model AttendanceRecord {
   checkOutAt      DateTime?           @map("check_out_at")
   workMinutes     Int?                @map("work_minutes")
   overtimeMinutes Int                 @default(0) @map("overtime_minutes")
-  todaysEarnings  Float?              @map("todays_earnings")
+  todaysEarnings  Decimal?              @map("todays_earnings") @db.Decimal(14, 2)
   isLate          Boolean             @default(false) @map("is_late")
   lateMinutes     Int                 @default(0) @map("late_minutes")
   method          AttendanceMethod?
@@ -1089,7 +1085,7 @@ model SalaryTemplateLine {
   id          String @id @default(cuid())
   templateId  String @map("template_id")
   componentId String @map("component_id")
-  amount      Float  @default(0)
+  amount      Decimal  @default(0) @db.Decimal(14, 2)
   formula     String?
   percentOfBasic Float? @map("percent_of_basic")
 
@@ -1105,7 +1101,7 @@ model EmployeeSalaryStructure {
   companyId  String   @map("company_id")
   employeeId String   @map("employee_id")
   effectiveFrom DateTime @map("effective_from") @db.Date
-  ctcAnnual  Float    @map("ctc_annual")
+  ctcAnnual  Decimal    @map("ctc_annual") @db.Decimal(14, 2)
   currency   String   @default("INR")
   isActive   Boolean  @default(true) @map("is_active")
   notes      String?
@@ -1123,7 +1119,7 @@ model EmployeeSalaryLine {
   id          String @id @default(cuid())
   structureId String @map("structure_id")
   componentId String @map("component_id")
-  amount      Float
+  amount      Decimal @db.Decimal(14, 2)
 
   structure EmployeeSalaryStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
   component SalaryComponent         @relation(fields: [componentId], references: [id])
@@ -1136,9 +1132,9 @@ model EmployeePayrollConfig {
   id            String   @id @default(cuid())
   companyId     String   @map("company_id")
   employeeId    String   @unique @map("employee_id")
-  grossMonthly  Float    @map("gross_monthly")
-  dailySalary   Float?   @map("daily_salary")
-  hourlySalary  Float?   @map("hourly_salary")
+  grossMonthly  Decimal    @map("gross_monthly") @db.Decimal(14, 2)
+  dailySalary   Decimal?   @map("daily_salary") @db.Decimal(14, 2)
+  hourlySalary  Decimal?   @map("hourly_salary") @db.Decimal(14, 2)
   salaryType    String   @default("MONTHLY") @map("salary_type")
   effectiveFrom DateTime @map("effective_from") @db.Date
   workingDays   Int      @default(30) @map("working_days")
@@ -1157,8 +1153,8 @@ model SalaryRevision {
   companyId  String   @map("company_id")
   employeeId String   @map("employee_id")
   effectiveFrom DateTime @map("effective_from") @db.Date
-  previousCtc Float?  @map("previous_ctc")
-  newCtc     Float    @map("new_ctc")
+  previousCtc Decimal?  @map("previous_ctc") @db.Decimal(14, 2)
+  newCtc     Decimal    @map("new_ctc") @db.Decimal(14, 2)
   reason     String?
   createdBy  String?  @map("created_by")
   snapshot   Json?
@@ -1197,15 +1193,23 @@ model PayrollLine {
   employeeId    String   @map("employee_id")
   earningsJson  Json     @map("earnings_json")
   deductionsJson Json    @map("deductions_json")
-  grossEarnings Float    @map("gross_earnings")
-  totalDeductions Float  @map("total_deductions")
-  netPay        Float    @map("net_pay")
+  grossEarnings Decimal    @map("gross_earnings") @db.Decimal(14, 2)
+  totalDeductions Decimal  @map("total_deductions") @db.Decimal(14, 2)
+  netPay        Decimal    @map("net_pay") @db.Decimal(14, 2)
   attendanceDays Float?  @map("attendance_days")
   lopDays       Float    @default(0) @map("lop_days")
   notes         String?
   paidAt        DateTime? @map("paid_at")
-  paidAmount    Float?    @map("paid_amount")
+  paidAmount    Decimal?    @map("paid_amount") @db.Decimal(14, 2)
   paidBy        String?   @map("paid_by")
+  /// Employer PF pension (EPS) contribution — not deducted from the employee.
+  employerPfEps Decimal  @default(0) @map("employer_pf_eps") @db.Decimal(14, 2)
+  /// Employer PF (EPF) contribution — not deducted from the employee.
+  employerPfEpf Decimal  @default(0) @map("employer_pf_epf") @db.Decimal(14, 2)
+  /// Employer ESI contribution — not deducted from the employee.
+  employerEsi   Decimal  @default(0) @map("employer_esi") @db.Decimal(14, 2)
+  /// Statutory calculation breakdown (taxable gross, regime, TDS projection, PF wage, ESI basis).
+  statutoryJson Json?    @map("statutory_json")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -1217,13 +1221,34 @@ model PayrollLine {
   @@map("payroll_lines")
 }
 
+/// Statutory payroll rule tables (income-tax slabs, PF, ESI, PT) per company per financial year.
+/// `rules` is validated by apps/api/src/payroll/statutory/types.ts (parseStatutoryRules).
+/// Defaults are seeded with verifyWithCA = true — VERIFY WITH CA BEFORE GO-LIVE.
+model StatutoryRuleSet {
+  id            String   @id @default(cuid())
+  companyId     String   @map("company_id")
+  /// Indian financial year, e.g. "2026-27" (April 2026 – March 2027).
+  financialYear String   @map("financial_year")
+  rules         Json
+  verifyWithCA  Boolean  @default(true) @map("verify_with_ca")
+  isActive      Boolean  @default(true) @map("is_active")
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, financialYear])
+  @@map("statutory_rule_sets")
+}
+
 model EsdLedgerEntry {
   id          String       @id @default(cuid())
   companyId   String       @map("company_id")
   employeeId  String       @map("employee_id")
   entryType   EsdEntryType @map("entry_type")
-  amount      Float
-  balanceAfter Float       @map("balance_after")
+  amount      Decimal @db.Decimal(14, 2)
+  balanceAfter Decimal       @map("balance_after") @db.Decimal(14, 2)
   year        Int
   month       Int?
   note        String?
@@ -1242,11 +1267,11 @@ model LoanAdvance {
   companyId       String            @map("company_id")
   employeeId      String            @map("employee_id")
   type            LoanAdvanceType
-  amount          Float
+  amount          Decimal @db.Decimal(14, 2)
   interestRate    Float             @default(0) @map("interest_rate")
   tenureMonths    Int               @map("tenure_months")
-  emiAmount       Float             @map("emi_amount")
-  outstanding     Float
+  emiAmount       Decimal             @map("emi_amount") @db.Decimal(14, 2)
+  outstanding     Decimal @db.Decimal(14, 2)
   reason          String?
   status          LoanAdvanceStatus @default(PENDING)
   approvedBy      String?           @map("approved_by")
@@ -1271,7 +1296,7 @@ model LoanEmiSchedule {
   installmentNo Int       @map("installment_no")
   dueYear       Int       @map("due_year")
   dueMonth      Int       @map("due_month")
-  amount        Float
+  amount        Decimal @db.Decimal(14, 2)
   paidAt        DateTime? @map("paid_at")
   createdAt     DateTime  @default(now()) @map("created_at")
 
@@ -1286,7 +1311,7 @@ model LoanRecoveryEntry {
   loanAdvanceId String   @map("loan_advance_id")
   year          Int
   month         Int
-  amount        Float
+  amount        Decimal @db.Decimal(14, 2)
   payrollRunId  String?  @map("payroll_run_id")
   note          String?
   createdAt     DateTime @default(now()) @map("created_at")
@@ -1302,7 +1327,7 @@ model ReimbursementClaim {
   companyId    String               @map("company_id")
   employeeId   String               @map("employee_id")
   category     String
-  amount       Float
+  amount       Decimal @db.Decimal(14, 2)
   description  String?
   receiptUrl   String?              @map("receipt_url")
   status       ReimbursementStatus  @default(PENDING)
@@ -1428,7 +1453,7 @@ model Asset {
   brand        String?
   model        String?
   purchaseDate DateTime?   @map("purchase_date") @db.Date
-  purchaseCost Float?      @map("purchase_cost")
+  purchaseCost Decimal?      @map("purchase_cost") @db.Decimal(14, 2)
   status       AssetStatus @default(AVAILABLE)
   notes        String?
   createdAt    DateTime    @default(now()) @map("created_at")
@@ -1469,7 +1494,7 @@ model AssetDamageCharge {
   companyId    String             @map("company_id")
   assetId      String             @map("asset_id")
   employeeId   String             @map("employee_id")
-  amount       Float
+  amount       Decimal @db.Decimal(14, 2)
   description  String?
   status       DamageChargeStatus @default(PENDING)
   payrollRunId String?            @map("payroll_run_id")
@@ -1537,9 +1562,9 @@ model FnfSettlement {
   employeeId    String    @map("employee_id")
   status        FnfStatus @default(DRAFT)
   linesJson     Json      @map("lines_json")
-  grossCredits  Float     @map("gross_credits")
-  grossDebits   Float     @map("gross_debits")
-  netPayable    Float     @map("net_payable")
+  grossCredits  Decimal     @map("gross_credits") @db.Decimal(14, 2)
+  grossDebits   Decimal     @map("gross_debits") @db.Decimal(14, 2)
+  netPayable    Decimal     @map("net_payable") @db.Decimal(14, 2)
   generatedAt   DateTime  @default(now()) @map("generated_at")
   finalizedAt   DateTime? @map("finalized_at")
   finalizedBy   String?   @map("finalized_by")
@@ -2124,240 +2149,6 @@ model ResumeScreening {
 
   @@index([companyId, createdAt])
   @@map("resume_screenings")
-}
-
-enum CrmLeadStatus {
-  NEW
-  CONTACTED
-  FOLLOW_UP
-  QUALIFIED
-  PROPOSAL
-  NEGOTIATION
-  WON
-  LOST
-}
-
-enum CrmTaskPriority {
-  LOW
-  MEDIUM
-  HIGH
-  URGENT
-}
-
-enum CrmTaskStatus {
-  PENDING
-  IN_PROGRESS
-  COMPLETED
-  VERIFIED
-  REOPENED
-}
-
-enum CrmDealStage {
-  PROSPECTING
-  QUALIFICATION
-  PROPOSAL
-  NEGOTIATION
-  WON
-  LOST
-}
-
-enum CrmFollowUpType {
-  CALL
-  EMAIL
-  MEETING
-  TASK
-  OTHER
-}
-
-model CrmCustomer {
-  id              String   @id @default(cuid())
-  companyId       String   @map("company_id")
-  name            String
-  email           String?
-  phone           String?
-  companyName     String?  @map("company_name")
-  address         String?
-  ownerEmployeeId String?  @map("owner_employee_id")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-
-  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  owner   Employee? @relation("CrmCustomerOwner", fields: [ownerEmployeeId], references: [id], onDelete: SetNull)
-  leads   CrmLead[]
-  deals   CrmDeal[]
-  followUps CrmFollowUp[]
-  notes   CrmNote[]
-
-  @@index([companyId, ownerEmployeeId])
-  @@map("crm_customers")
-}
-
-model CrmLead {
-  id              String        @id @default(cuid())
-  companyId       String        @map("company_id")
-  title           String
-  source          String?
-  status          CrmLeadStatus @default(NEW)
-  priority        CrmTaskPriority @default(MEDIUM)
-  expectedValue   Float?        @map("expected_value")
-  ownerEmployeeId String?       @map("owner_employee_id")
-  customerId      String?       @map("customer_id")
-  contactName     String?       @map("contact_name")
-  contactEmail    String?       @map("contact_email")
-  contactPhone    String?       @map("contact_phone")
-  whatsapp        String?
-  followUpAt      DateTime?     @map("follow_up_at")
-  nextAction      String?       @map("next_action")
-  description     String?
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
-
-  company  Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  owner    Employee?    @relation("CrmLeadOwner", fields: [ownerEmployeeId], references: [id], onDelete: SetNull)
-  customer CrmCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  deals    CrmDeal[]
-  followUps CrmFollowUp[]
-  notes    CrmNote[]
-  tasks    CrmTask[]
-  activities CrmActivityLog[]
-
-  @@index([companyId, status])
-  @@index([companyId, ownerEmployeeId])
-  @@index([companyId, followUpAt])
-  @@map("crm_leads")
-}
-
-model CrmDeal {
-  id                String       @id @default(cuid())
-  companyId         String       @map("company_id")
-  title             String
-  stage             CrmDealStage @default(PROSPECTING)
-  amount            Float        @default(0)
-  ownerEmployeeId   String?      @map("owner_employee_id")
-  customerId        String?      @map("customer_id")
-  leadId            String?      @map("lead_id")
-  expectedCloseDate DateTime?    @map("expected_close_date") @db.Date
-  closedAt          DateTime?    @map("closed_at")
-  description       String?
-  createdAt         DateTime     @default(now()) @map("created_at")
-  updatedAt         DateTime     @updatedAt @map("updated_at")
-
-  company  Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  owner    Employee?    @relation("CrmDealOwner", fields: [ownerEmployeeId], references: [id], onDelete: SetNull)
-  customer CrmCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  lead     CrmLead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  followUps CrmFollowUp[]
-  notes    CrmNote[]
-
-  @@index([companyId, stage])
-  @@index([companyId, ownerEmployeeId])
-  @@map("crm_deals")
-}
-
-model CrmFollowUp {
-  id              String          @id @default(cuid())
-  companyId       String          @map("company_id")
-  title           String
-  type            CrmFollowUpType @default(CALL)
-  dueAt           DateTime        @map("due_at")
-  completedAt     DateTime?       @map("completed_at")
-  ownerEmployeeId String          @map("owner_employee_id")
-  leadId          String?         @map("lead_id")
-  dealId          String?         @map("deal_id")
-  customerId      String?         @map("customer_id")
-  notes           String?
-  createdAt       DateTime        @default(now()) @map("created_at")
-  updatedAt       DateTime        @updatedAt @map("updated_at")
-
-  company  Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  owner    Employee     @relation("CrmFollowUpOwner", fields: [ownerEmployeeId], references: [id], onDelete: Cascade)
-  lead     CrmLead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  deal     CrmDeal?     @relation(fields: [dealId], references: [id], onDelete: SetNull)
-  customer CrmCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-
-  @@index([companyId, dueAt])
-  @@index([companyId, ownerEmployeeId])
-  @@map("crm_follow_ups")
-}
-
-model CrmNote {
-  id               String   @id @default(cuid())
-  companyId        String   @map("company_id")
-  content          String   @db.Text
-  authorEmployeeId String?  @map("author_employee_id")
-  leadId           String?  @map("lead_id")
-  dealId           String?  @map("deal_id")
-  customerId       String?  @map("customer_id")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-
-  company Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  author  Employee?    @relation("CrmNoteAuthor", fields: [authorEmployeeId], references: [id], onDelete: SetNull)
-  lead    CrmLead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  deal    CrmDeal?     @relation(fields: [dealId], references: [id], onDelete: SetNull)
-  customer CrmCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-
-  @@index([companyId, createdAt])
-  @@map("crm_notes")
-}
-
-model CrmTask {
-  id                   String          @id @default(cuid())
-  companyId            String          @map("company_id")
-  title                String
-  description          String?
-  priority             CrmTaskPriority @default(MEDIUM)
-  status               CrmTaskStatus   @default(PENDING)
-  dueAt                DateTime?       @map("due_at")
-  assignedByEmployeeId String?         @map("assigned_by_employee_id")
-  assignedToEmployeeId String          @map("assigned_to_employee_id")
-  leadId               String?         @map("lead_id")
-  attachmentUrls       Json?           @map("attachment_urls")
-  verifiedAt           DateTime?       @map("verified_at")
-  createdAt            DateTime        @default(now()) @map("created_at")
-  updatedAt            DateTime        @updatedAt @map("updated_at")
-
-  company    Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  assignedBy Employee?        @relation("CrmTaskAssigner", fields: [assignedByEmployeeId], references: [id], onDelete: SetNull)
-  assignedTo Employee         @relation("CrmTaskAssignee", fields: [assignedToEmployeeId], references: [id], onDelete: Cascade)
-  lead       CrmLead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  comments   CrmTaskComment[]
-
-  @@index([companyId, status])
-  @@index([companyId, assignedToEmployeeId])
-  @@map("crm_tasks")
-}
-
-model CrmTaskComment {
-  id               String   @id @default(cuid())
-  taskId           String   @map("task_id")
-  authorEmployeeId String?  @map("author_employee_id")
-  content          String   @db.Text
-  createdAt        DateTime @default(now()) @map("created_at")
-
-  task   CrmTask   @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  author Employee? @relation(fields: [authorEmployeeId], references: [id], onDelete: SetNull)
-
-  @@index([taskId, createdAt])
-  @@map("crm_task_comments")
-}
-
-model CrmActivityLog {
-  id               String   @id @default(cuid())
-  companyId        String   @map("company_id")
-  leadId           String?  @map("lead_id")
-  actorEmployeeId  String?  @map("actor_employee_id")
-  action           String
-  detail           String?
-  meta             Json?
-  createdAt        DateTime @default(now()) @map("created_at")
-
-  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  lead    CrmLead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  actor   Employee? @relation(fields: [actorEmployeeId], references: [id], onDelete: SetNull)
-
-  @@index([companyId, leadId, createdAt])
-  @@map("crm_activity_logs")
 }
 
 model LoginSession {

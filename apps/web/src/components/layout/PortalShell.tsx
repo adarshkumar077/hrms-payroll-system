@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { getStoredUser, getToken, SessionUser, api } from '@/lib/api';
+import { getToken, initSession, PASSWORD_CHANGE_PATH, SessionUser, api } from '@/lib/api';
 import { canAccessPath } from '@/lib/navigation';
 import { isAdmin, ViewMode } from '@/lib/roles';
 import { Sidebar } from './Sidebar';
@@ -61,25 +61,40 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const isPublic = PUBLIC_PATHS.includes(pathname);
 
   useEffect(() => {
+    let cancelled = false;
     setBootError(false);
-    const u = getStoredUser();
-    if (!isPublic && !u) {
-      router.replace('/');
-      return;
-    }
-    setUser(u);
+    (async () => {
+      // Access token lives in memory only: on a fresh page load this does one silent
+      // POST /auth/refresh (httpOnly cookie) before any page renders or calls the API.
+      let u: SessionUser | null;
+      try {
+        u = await initSession();
+      } catch {
+        if (!cancelled && !isPublic) setBootError(true);
+        return;
+      }
+      if (cancelled) return;
+      if (!isPublic && !u) {
+        router.replace('/');
+        return;
+      }
+      setUser(u);
 
-    if (u?.forcePasswordChange && !isPublic && pathname !== '/account/password') {
+      // Server enforces this too (403 PASSWORD_CHANGE_REQUIRED); keep the user on the form.
+      if (u?.forcePasswordChange && !isPublic && pathname !== PASSWORD_CHANGE_PATH) {
+        router.replace(`${PASSWORD_CHANGE_PATH}?required=true`);
+        return;
+      }
+
+      if (u && !isPublic && !canAccessPath(u, pathname)) {
+        router.replace('/dashboard');
+        return;
+      }
       setReady(true);
-      router.replace('/account/password?required=true');
-      return;
-    }
-
-    if (u && !isPublic && !canAccessPath(u, pathname)) {
-      router.replace('/dashboard');
-      return;
-    }
-    setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [isPublic, router, pathname]);
 
   // Never leave mobile on an infinite spinner if navigation stalls.
@@ -104,7 +119,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   useEffect(() => {
-    if (!user || !getToken()) return;
+    if (!user || user.forcePasswordChange || !getToken()) return;
     deferIdle(() => {
       api<{
         primaryColor?: string;
@@ -156,6 +171,9 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     );
   }
   if (!user) return <>{children}</>;
+  // Until the password is changed every other API route is blocked, so render only the form
+  // (no sidebar/nav/assistant widgets that would fire blocked requests).
+  if (user.forcePasswordChange) return <>{children}</>;
 
   return (
     <div className="flex min-h-screen bg-surface-muted">

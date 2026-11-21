@@ -16,7 +16,7 @@ type Profile = {
 };
 
 export default function ProfileScreen() {
-  const { token } = useLocalSearchParams<{ token: string }>();
+  const { token, roles } = useLocalSearchParams<{ token: string; roles?: string }>();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState('');
 
@@ -90,6 +90,13 @@ export default function ProfileScreen() {
           />
           <Pressable style={styles.btn} onPress={save}>
             <Text style={styles.btnText}>Save</Text>
+          </Pressable>
+          <Pressable
+            onPress={() =>
+              router.push({ pathname: '/change-password', params: { token, roles: roles ?? '' } })
+            }
+          >
+            <Text style={styles.link}>Change password</Text>
           </Pressable>
           <Pressable onPress={() => router.push({ pathname: '/attendance', params: { token } })}>
         <Text style={styles.link}>Mark Attendance</Text>

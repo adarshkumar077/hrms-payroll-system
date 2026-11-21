@@ -66,9 +66,11 @@ export class LoginPasswordDto {
 }
 
 export class RefreshTokenDto {
-  @ApiProperty()
+  /** Mobile/API clients send it here; the web app sends it as the httpOnly `eitf_rt` cookie instead. */
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
-  refreshToken!: string;
+  refreshToken?: string;
 }
 
 export class LogoutDto {
@@ -92,12 +94,12 @@ export class ChangePasswordDto {
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   newPassword!: string;
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   confirmPassword!: string;
 }
 
@@ -130,12 +132,12 @@ export class SetupSuperAdminDto {
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   password!: string;
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   confirmPassword!: string;
 
   @ApiPropertyOptional()
@@ -161,12 +163,12 @@ export class CreateAdminUserDto {
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   password!: string;
 
   @ApiProperty()
   @IsString()
-  @MinLength(5)
+  @MinLength(8)
   confirmPassword!: string;
 
   @ApiProperty({ enum: ['HR'] })

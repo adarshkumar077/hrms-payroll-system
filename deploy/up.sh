@@ -40,5 +40,5 @@ else
   echo "  Local check: http://127.0.0.1:${PORT}"
 fi
 echo "  Health:      ${PUBLIC_APP_URL:-http://127.0.0.1:${PORT}}/api/v1/health"
-echo "  Login:       superadmin / Super@123  (change after first login)"
+echo "  Login:       BOOTSTRAP_ADMIN_EMAIL from .env.production (password change required at first login)"
 echo "════════════════════════════════════════════════════════"

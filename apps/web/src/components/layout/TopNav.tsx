@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SessionUser, clearSession, api } from '@/lib/api';
+import { SessionUser, logout, api } from '@/lib/api';
 import { getAllSearchableRoutes } from '@/lib/navigation';
 import { isAdmin, ViewMode, getPersonaLabel } from '@/lib/roles';
 import { applyTheme, readStoredTheme, saveTheme, ThemeMode } from '@/lib/theme';
@@ -232,7 +232,7 @@ export function TopNav({
                 <button
                   type="button"
                   className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-danger hover:bg-danger-light/50"
-                  onClick={() => { clearSession(); router.push('/'); }}
+                  onClick={() => { void logout().then(() => router.push('/')); }}
                 >
                   <LogoutIcon className="w-4 h-4" />
                   Sign out

@@ -1,4 +1,4 @@
-# EITF HRMS + Payroll + CRM — Production stack
+# EITF HRMS + Payroll — Production stack
 # One command: docker compose --env-file .env.production up -d --build
 #
 # Public access options (pick one):
@@ -70,7 +70,22 @@ services:
       API_PREFIX: api/v1
       CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS to your HTTPS origin in .env.production}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
+      INTEGRATION_SECRET_KEY: ${INTEGRATION_SECRET_KEY:?Set INTEGRATION_SECRET_KEY in .env.production (to keep existing encrypted integration secrets readable, use your current JWT_ACCESS_SECRET value)}
+      TRUST_PROXY: ${TRUST_PROXY:-}
       LOCAL_STORAGE_DIR: /app/apps/api/uploads
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_SIGNING_SECRET: ${STORAGE_SIGNING_SECRET:-}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_LOGIN_ID: ${BOOTSTRAP_ADMIN_LOGIN_ID:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
     volumes:
       - eitf_uploads:/app/apps/api/uploads
       - eitf_backups:/app/apps/api/data
@@ -97,6 +112,9 @@ services:
       PORT: 3000
       HOSTNAME: 0.0.0.0
       API_INTERNAL_URL: http://api:3001
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      # S3/R2 bucket origin for presigned selfie links (Content-Security-Policy img-src)
+      STORAGE_PUBLIC_ORIGIN: ${STORAGE_PUBLIC_ORIGIN:-}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -158,7 +176,10 @@ services:
     networks: [eitf]
 
   db-backup:
-    image: postgres:16-alpine
+    build:
+      context: ./deploy/backup
+      dockerfile: Dockerfile
+    image: eitf-hrms-db-backup:latest
     container_name: eitf-hrms-db-backup
     restart: unless-stopped
     depends_on:
@@ -170,10 +191,12 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB:-eitf_hrms}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-20}
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      BACKUP_RCLONE_REMOTE: ${BACKUP_RCLONE_REMOTE:-}
     volumes:
       - eitf_db_backups:/backups
-      - ./scripts/backup-db.sh:/usr/local/bin/backup-db.sh:ro
-    entrypoint: ["/bin/sh", "-c", "chmod +x /usr/local/bin/backup-db.sh 2>/dev/null; while true; do /usr/local/bin/backup-db.sh; sleep ${BACKUP_INTERVAL_SEC:-86400}; done"]
+      - ${BACKUP_RCLONE_CONFIG_DIR:-./deploy/backup/rclone}:/config/rclone:ro
     logging: *default-logging
     networks: [eitf]
 

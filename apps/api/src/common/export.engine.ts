@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { serializeMoney } from './money';
 
 export type ExportFile = {
   filename: string;
@@ -7,7 +8,7 @@ export type ExportFile = {
 };
 
 function slug(title: string) {
-  return title.replace(/\s+/g, '_').toLowerCase().replace(/[^a-z0-9_\-]/g, '');
+  return title.replace(/\s+/g, '_').toLowerCase().replace(/[^a-z0-9_-]/g, '');
 }
 
 export function rowsToCsv(rows: Record<string, unknown>[]): string {
@@ -83,8 +84,10 @@ export async function rowsToXlsx(title: string, rows: Record<string, unknown>[])
 export async function buildExport(
   format: 'csv' | 'excel' | 'pdf',
   title: string,
-  rows: Record<string, unknown>[],
+  rawRows: Record<string, unknown>[],
 ): Promise<ExportFile> {
+  // Prisma.Decimal money → 2dp numbers so CSV/XLSX/PDF cells are numeric, not objects.
+  const rows = serializeMoney(rawRows);
   const base = slug(title) || 'export';
   if (format === 'csv') {
     return {

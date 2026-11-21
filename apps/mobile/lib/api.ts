@@ -1,3 +1,5 @@
+import { router } from 'expo-router';
+
 /**
  * Production API base — set EXPO_PUBLIC_API_URL at build time.
  * Example: https://hrms.yourcompany.com/api/v1
@@ -27,6 +29,10 @@ export async function api<T>(
   const res = await fetch(`${API_URL}${path}`, { ...options, headers });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (res.status === 403 && (data as { code?: string }).code === 'PASSWORD_CHANGE_REQUIRED') {
+      router.replace({ pathname: '/change-password', params: { token } });
+      throw new Error('You must change your password before continuing.');
+    }
     throw new Error((data as { message?: string }).message ?? `Request failed (${res.status})`);
   }
   return data as T;
