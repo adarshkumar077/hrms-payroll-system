@@ -45,6 +45,7 @@ import {
   normalizePayrollConfig,
   PayrollPreview,
 } from './payroll-calculator';
+import { isIncentiveEligible, tallyMonthAttendance, type IncentiveRules } from './incentive';
 import {
   PriorPayrollLine,
   priorMonthsInEsiPeriod,
@@ -348,6 +349,14 @@ export class PayrollService {
     const incentiveEnabled = await this.setting(user.companyId, 'incentive.enabled', true);
     const incentiveAmount = await this.setting(user.companyId, 'incentive.amount', 0);
     const maxLate = await this.setting(user.companyId, 'incentive.max_late_marks', 0);
+    const incentiveRules: IncentiveRules = {
+      enabled: incentiveEnabled,
+      amount: incentiveAmount,
+      maxLateMarks: maxLate,
+      requireNoHalfDay: await this.setting(user.companyId, 'incentive.require_no_half_day', true),
+      requireNoAbsent: await this.setting(user.companyId, 'incentive.require_no_absent', true),
+      requireNoUlob: await this.setting(user.companyId, 'incentive.require_no_ulob', true),
+    };
 
     // Statutory rule tables for the run's FY and what was already paid earlier in the FY.
     const { rules: statutoryRules } = await this.statutoryRules.getRulesForMonth(
@@ -393,9 +402,6 @@ export class PayrollService {
         const lopDays =
           attendance.filter((a) => lopStatuses.includes(a.status)).length +
           attendance.filter((a) => a.status === AttendanceDayStatus.HD).length * 0.5;
-        const counter = await tx.employeeAttendanceCounter.findUnique({
-          where: { employeeId: emp.id },
-        });
 
         // Every line item amount is rounded HALF_UP to 2dp when it is added; totals are
         // exact Decimal sums of those rounded lines, so gross − deductions = net to the paisa.
@@ -473,12 +479,10 @@ export class PayrollService {
           deductions.push(item('LOP', 'Loss of Pay', lopAmt));
         }
 
-        // Incentive
-        if (
-          incentiveEnabled &&
-          incentiveAmount > 0 &&
-          (counter?.lateMarkCount ?? 0) <= maxLate
-        ) {
+        // Incentive: judged on this month's attendance (late marks, absences, half days, ULOB)
+        // against every incentive.* rule — not the running late counter, which resets on
+        // late→HD conversion and ignored absences entirely.
+        if (isIncentiveEligible(tallyMonthAttendance(attendance), incentiveRules)) {
           earnings.push(item('INCENTIVE', 'Attendance Incentive', incentiveAmount));
         }
 
