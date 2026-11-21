@@ -13,11 +13,11 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "prisma:seed": "tsx prisma/seed.ts",
-    "prisma:ensure-accounts": "tsx prisma/ensure-accounts.ts",
-    "prisma:bootstrap-super-admin": "tsx prisma/bootstrap-super-admin.ts",
+    "prisma:seed": "tsx --import dotenv/config prisma/seed.ts",
+    "prisma:ensure-accounts": "tsx --import dotenv/config prisma/ensure-accounts.ts",
+    "prisma:bootstrap-super-admin": "tsx --import dotenv/config prisma/bootstrap-super-admin.ts",
     "prisma:studio": "prisma studio",
-    "db:migrate-selfies": "tsx prisma/migrate-selfies-to-storage.ts"
+    "db:migrate-selfies": "tsx --import dotenv/config prisma/migrate-selfies-to-storage.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1169.0",
@@ -36,6 +36,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "cookie-parser": "^1.4.7",
+    "dotenv": "^17.4.1",
     "exceljs": "^4.4.0",
     "helmet": "^8.3.0",
     "ioredis": "^5.4.2",
