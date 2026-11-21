@@ -104,7 +104,26 @@ export class AuthService {
       this.logger.debug(`OTP sent to mobile ending ${dto.mobile.slice(-4)} (dev only)`);
     }
 
+    // Local development only: with no SMS gateway, hand the code back so the login screen can
+    // show it. Requires an explicit OTP_SHOW_IN_UI=true AND a non-production NODE_ENV AND the
+    // console SMS provider, so a misconfigured server can never leak codes.
+    if (this.isOtpShownInUi()) {
+      return {
+        message: 'If the mobile is registered, an OTP has been sent.',
+        expiresIn: ttl,
+        devCode: code,
+      };
+    }
+
     return { message: 'If the mobile is registered, an OTP has been sent.', expiresIn: ttl };
+  }
+
+  private isOtpShownInUi(): boolean {
+    return (
+      this.config.get('OTP_SHOW_IN_UI') === 'true' &&
+      this.config.get('NODE_ENV') !== 'production' &&
+      (this.config.get('SMS_PROVIDER') ?? 'console') === 'console'
+    );
   }
 
   async verifyOtp(dto: VerifyOtpDto, meta?: { ip?: string; ua?: string }) {
