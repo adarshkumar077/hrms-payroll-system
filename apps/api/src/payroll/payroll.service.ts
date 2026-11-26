@@ -57,6 +57,14 @@ import * as M from '../common/money';
 
 type PayItem = { code: string; name: string; amount: number };
 
+/**
+ * Payroll generation / approval process every active employee inside ONE transaction (all lines
+ * or none). Prisma's default interactive-transaction timeout is 5 s, which a load test hit at
+ * ~450 employees (HTTP 500, run rolled back). Allow up to 10 minutes; waiting for a connection
+ * stays bounded.
+ */
+const PAYROLL_TX_OPTIONS = { timeout: 600_000, maxWait: 20_000 } as const;
+
 @Injectable()
 export class PayrollService {
   constructor(
@@ -611,7 +619,7 @@ export class PayrollService {
           generatedAt: new Date(),
         },
       });
-    });
+    }, PAYROLL_TX_OPTIONS);
 
     await this.audit.log({
       companyId: user.companyId,
@@ -766,7 +774,7 @@ export class PayrollService {
           approvedBy: user.id,
         },
       });
-    });
+    }, PAYROLL_TX_OPTIONS);
 
     await this.audit.log({
       companyId: user.companyId,

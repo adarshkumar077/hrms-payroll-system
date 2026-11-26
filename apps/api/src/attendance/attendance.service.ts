@@ -1309,6 +1309,11 @@ export class AttendanceService implements OnModuleInit {
     if (opts.scope === 'one' && !opts.employeeId && this.isHr(user)) {
       throw new BadRequestException('Select an employee to export');
     }
+    // Employees may only export (and trigger recalculation of) their own sheet.
+    if (!this.isHr(user)) {
+      if (!user.employeeId) throw new ForbiddenException('No employee profile');
+      opts = { ...opts, employeeId: user.employeeId };
+    }
 
     // Ensure late-cycle HD + earnings are current before building the workbook.
     if (opts.scope === 'one' && opts.employeeId) {

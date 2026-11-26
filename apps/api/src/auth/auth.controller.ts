@@ -59,11 +59,18 @@ export class AuthController {
     };
   }
 
+  /** Whether mobile OTP login is available (an SMS provider is configured). */
+  @Public()
+  @Get('otp/status')
+  otpStatus() {
+    return this.auth.otpStatus();
+  }
+
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('otp/request')
-  requestOtp(@Body() dto: RequestOtpDto) {
-    return this.auth.requestOtp(dto);
+  requestOtp(@Body() dto: RequestOtpDto, @Req() req: Request) {
+    return this.auth.requestOtp(dto, req.ip);
   }
 
   @Public()

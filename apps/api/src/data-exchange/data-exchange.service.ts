@@ -185,9 +185,8 @@ export class DataExchangeService {
   }
 
   private assertExport(user: AuthUser) {
-    if (user.roles.includes(RoleCode.EMPLOYEE) && !user.roles.some((r) => r !== RoleCode.EMPLOYEE)) {
-      return;
-    }
+    // Exports are company-wide reports (all employees' payroll / attendance / leave), so
+    // employee-only accounts must not reach them. Employees use their own /me/* endpoints.
     if (user.roles.includes(RoleCode.SUPER_ADMIN) || user.roles.includes(RoleCode.ADMIN) || user.roles.includes(RoleCode.HR)) {
       return;
     }

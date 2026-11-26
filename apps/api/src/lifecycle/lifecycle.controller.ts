@@ -128,8 +128,10 @@ export class LifecycleController {
 
   @Get('exit/:id')
   @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE, RoleCode.ADMIN)
-  getExit(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.lifecycle.getResignation(user.companyId, id);
+  async getExit(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const row = await this.lifecycle.getResignation(user.companyId, id);
+    assertEmployeeScope(user, row.employeeId, 'You can only view your own exit request');
+    return row;
   }
 
   @Post('exit/:id/review')
@@ -207,6 +209,7 @@ export class LifecycleController {
   @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.EMPLOYEE)
   async getFnf(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const r = await this.lifecycle.getResignation(user.companyId, id);
+    assertEmployeeScope(user, r.employeeId, 'You can only view your own settlement');
     return r.fnf;
   }
 

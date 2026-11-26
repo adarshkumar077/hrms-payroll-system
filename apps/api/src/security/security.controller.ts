@@ -14,7 +14,7 @@ import { RoleCode } from '@prisma/client';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../auth/decorators/current-user.decorator';
 import { SecurityService } from './security.service';
-import { buildExport } from '../common/export.engine';
+import { buildExport, csvCell } from '../common/export.engine';
 
 @ApiTags('security')
 @ApiBearerAuth()
@@ -91,10 +91,7 @@ export class SecurityController {
       });
     }
     const keys = Object.keys(rows[0]);
-    const esc = (v: unknown) => {
-      const s = v == null ? '' : String(v);
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
+    const esc = csvCell; // shared escaping incl. CSV-injection guard
     const csv = [keys.join(','), ...rows.map((r) => keys.map((k) => esc((r as Record<string, unknown>)[k])).join(','))].join(
       '\n',
     );
@@ -154,10 +151,7 @@ export class SecurityController {
       });
     }
     const keys = Object.keys(rows[0]);
-    const esc = (v: unknown) => {
-      const s = v == null ? '' : String(v);
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
+    const esc = csvCell; // shared escaping incl. CSV-injection guard
     const csv = [keys.join(','), ...rows.map((r) => keys.map((k) => esc(r[k])).join(','))].join('\n');
     return new StreamableFile(Buffer.from(csv, 'utf8'), {
       type: 'text/csv',

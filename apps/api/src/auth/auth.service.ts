@@ -5,8 +5,16 @@ import {
   UnauthorizedException,
   ForbiddenException,
   Inject,
+  Optional,
+  ServiceUnavailableException,
   forwardRef,
 } from '@nestjs/common';
+import {
+  OTP_INVALID_MESSAGE,
+  OTP_UNAVAILABLE_MESSAGE,
+  OtpService,
+  isOtpEligible,
+} from './otp/otp.service';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuditAction, RoleCode, User, UserStatus } from '@prisma/client';
@@ -45,6 +53,8 @@ export class AuthService {
     private readonly audit: AuditService,
     @Inject(forwardRef(() => SecurityService))
     private readonly security: SecurityService,
+    @Optional()
+    private readonly otp?: OtpService,
   ) {}
 
   private hash(value: string) {
@@ -73,96 +83,49 @@ export class AuthService {
     return Number.isFinite(n) ? n : fallback;
   }
 
-  async requestOtp(dto: RequestOtpDto) {
-    const companyId = await this.resolveCompanyId(dto.companyId);
-    const user = await this.prisma.user.findFirst({
-      where: { companyId, mobile: dto.mobile, status: { not: UserStatus.INACTIVE } },
-    });
-    if (!user) {
-      // Do not reveal whether mobile exists
-      return { message: 'If the mobile is registered, an OTP has been sent.', expiresIn: 300 };
-    }
-
-    const length = Number(this.config.get('OTP_LENGTH') ?? 6);
-    const ttl = Number(this.config.get('OTP_TTL_SECONDS') ?? 300);
-    const code = String(randomInt(0, 10 ** length)).padStart(length, '0');
-
-    await this.prisma.otpChallenge.create({
-      data: {
-        companyId,
-        userId: user.id,
-        mobile: dto.mobile,
-        codeHash: this.hash(code),
-        purpose: 'login',
-        expiresAt: new Date(Date.now() + ttl * 1000),
-      },
-    });
-
-    // Never log OTP codes — security requirement
-    const provider = this.config.get('SMS_PROVIDER') ?? 'console';
-    if (provider === 'console' && this.config.get('NODE_ENV') !== 'production') {
-      this.logger.debug(`OTP sent to mobile ending ${dto.mobile.slice(-4)} (dev only)`);
-    }
-
-    // Local development only: with no SMS gateway, hand the code back so the login screen can
-    // show it. Requires an explicit OTP_SHOW_IN_UI=true AND a non-production NODE_ENV AND the
-    // console SMS provider, so a misconfigured server can never leak codes.
-    if (this.isOtpShownInUi()) {
-      return {
-        message: 'If the mobile is registered, an OTP has been sent.',
-        expiresIn: ttl,
-        devCode: code,
-      };
-    }
-
-    return { message: 'If the mobile is registered, an OTP has been sent.', expiresIn: ttl };
+  otpStatus() {
+    return this.requireOtp().status();
   }
 
-  private isOtpShownInUi(): boolean {
-    return (
-      this.config.get('OTP_SHOW_IN_UI') === 'true' &&
-      this.config.get('NODE_ENV') !== 'production' &&
-      (this.config.get('SMS_PROVIDER') ?? 'console') === 'console'
-    );
+  private requireOtp(): OtpService {
+    if (!this.otp) throw new ServiceUnavailableException(OTP_UNAVAILABLE_MESSAGE);
+    return this.otp;
+  }
+
+  /**
+   * Mobile OTP login (employee accounts only). The OTP itself is generated, hashed, rate-limited
+   * and delivered by OtpService; it is never returned, logged or sent to the frontend.
+   */
+  async requestOtp(dto: RequestOtpDto, ip?: string | null) {
+    const otp = this.requireOtp();
+    const companyId = await this.resolveCompanyId(dto.companyId);
+    return otp.request(companyId, dto.mobile, ip);
   }
 
   async verifyOtp(dto: VerifyOtpDto, meta?: { ip?: string; ua?: string }) {
+    const otp = this.requireOtp();
     const companyId = await this.resolveCompanyId(dto.companyId);
-    const challenge = await this.prisma.otpChallenge.findFirst({
-      where: {
-        companyId,
-        mobile: dto.mobile,
-        consumedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const userId = await otp.verify(companyId, dto.mobile, dto.code, meta);
 
-    if (!challenge || challenge.codeHash !== this.hash(dto.code)) {
-      if (challenge) {
-        await this.prisma.otpChallenge.update({
-          where: { id: challenge.id },
-          data: { attempts: { increment: 1 } },
-        });
-      }
-      throw new UnauthorizedException('Invalid or expired OTP');
+    // Re-check eligibility at login time: the account or employee may have changed since the
+    // OTP was requested (deactivated, role changed, unlinked).
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, companyId },
+      include: {
+        userRoles: { include: { role: true } },
+        moduleAccess: true,
+        employee: { select: { isActive: true, status: true } },
+      },
+    });
+    const lockout = user?.status === UserStatus.LOCKED ? await otp.lockoutMinutes(companyId) : undefined;
+    if (!user || !isOtpEligible(user, lockout)) {
+      throw new UnauthorizedException(OTP_INVALID_MESSAGE);
     }
 
-    await this.prisma.otpChallenge.update({
-      where: { id: challenge.id },
-      data: { consumedAt: new Date() },
-    });
-
-    const user = await this.prisma.user.findFirst({
-      where: { id: challenge.userId!, companyId },
-      include: { userRoles: { include: { role: true } }, moduleAccess: true },
-    });
-    if (!user) throw new UnauthorizedException('User not found');
-
-    await this.ensureNotLocked(user);
+    await this.ensureNotLocked(user); // auto-unlocks an expired timed lockout, as password login does
     await this.verifyTotpIfNeeded(user, dto.totpCode);
 
-    return this.issueSession(user, meta);
+    return this.issueSession(user, meta, { loginMethod: 'mobile_otp' });
   }
 
   private async getNextLoginId(companyId: string, role: 'SA' | 'HR') {
@@ -397,7 +360,7 @@ export class AuthService {
       moduleAccess: { moduleKey: string; canAccess: boolean }[];
     },
     meta?: { ip?: string; ua?: string },
-    opts: { isRefresh?: boolean } = {},
+    opts: { isRefresh?: boolean; loginMethod?: 'mobile_otp' } = {},
   ) {
     const roles = user.userRoles.map((ur) => ur.role.code);
     const sessionMinutes = await this.security.getSettingNumber(
@@ -431,7 +394,7 @@ export class AuthService {
     // A silent refresh (web does one on every page load) is not a new login: skip
     // lastLoginAt / LOGIN audit / login-session rows so they keep meaning "user signed in".
     if (!opts.isRefresh) {
-      await this.recordLogin(user, meta);
+      await this.recordLogin(user, meta, opts.loginMethod);
     }
 
     const mustEnable2fa =
@@ -461,7 +424,7 @@ export class AuthService {
     };
   }
 
-  private async recordLogin(user: User, meta?: { ip?: string; ua?: string }) {
+  private async recordLogin(user: User, meta?: { ip?: string; ua?: string }, loginMethod?: string) {
     await this.prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
@@ -476,6 +439,8 @@ export class AuthService {
         entityId: user.id,
         ipAddress: meta?.ip,
         userAgent: meta?.ua,
+        // Password logins keep their previous (empty) metadata; OTP logins are labelled.
+        ...(loginMethod ? { metadata: { method: loginMethod } } : {}),
       });
     } catch (auditErr) {
       this.logger.error(
@@ -626,6 +591,9 @@ export class AuthService {
     const user = await this.prisma.user.findFirstOrThrow({ where: { id: userId, companyId } });
     if (!user.passwordHash || !(await bcrypt.compare(current, user.passwordHash))) {
       throw new BadRequestException('Current password is incorrect');
+    }
+    if (next === current) {
+      throw new BadRequestException('New password must be different from the current password.');
     }
     await this.security.validatePassword(companyId, next);
     await this.prisma.user.update({
@@ -821,7 +789,8 @@ export class AuthService {
         passwordHash,
         displayName: dto.displayName.trim(),
         status: UserStatus.ACTIVE,
-        forcePasswordChange: false,
+        // Super Admin chose this password; the HR user must replace it at first login.
+        forcePasswordChange: true,
         userRoles: { create: [{ roleId: role.id }] },
       },
       include: { userRoles: { include: { role: true } } },

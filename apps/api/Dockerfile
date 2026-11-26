@@ -29,7 +29,10 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
+# Source files that prisma/seed.ts imports at container start (roles, settings, statutory rules).
+# Without them the seed fails silently and a fresh database has no company, roles or admin.
 COPY --from=build /app/apps/api/src/company/default-settings.ts ./apps/api/src/company/default-settings.ts
+COPY --from=build /app/apps/api/src/payroll/statutory ./apps/api/src/payroll/statutory
 COPY apps/api/docker-entrypoint.sh ./apps/api/docker-entrypoint.sh
 RUN chmod +x ./apps/api/docker-entrypoint.sh \
   && mkdir -p /app/apps/api/uploads /app/apps/api/data

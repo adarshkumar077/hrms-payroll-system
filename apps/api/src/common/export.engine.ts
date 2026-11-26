@@ -11,14 +11,22 @@ function slug(title: string) {
   return title.replace(/\s+/g, '_').toLowerCase().replace(/[^a-z0-9_-]/g, '');
 }
 
+/**
+ * One CSV cell. Text that a spreadsheet would treat as a formula (starts with = + - @, tab or CR)
+ * gets a leading apostrophe, so a hostile value such as an employee named
+ * =HYPERLINK("http://evil…") opens as plain text in Excel instead of running (CSV injection,
+ * OWASP). Numbers are left alone, so negative amounts stay numeric.
+ */
+export function csvCell(v: unknown): string {
+  let s = v == null ? '' : String(v);
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 export function rowsToCsv(rows: Record<string, unknown>[]): string {
   if (!rows.length) return '';
   const keys = Object.keys(rows[0]);
-  const esc = (v: unknown) => {
-    const s = v == null ? '' : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  return [keys.join(','), ...rows.map((r) => keys.map((k) => esc(r[k])).join(','))].join('\n');
+  return [keys.map(csvCell).join(','), ...rows.map((r) => keys.map((k) => csvCell(r[k])).join(','))].join('\n');
 }
 
 export function rowsToHtmlPdf(title: string, rows: Record<string, unknown>[]): string {

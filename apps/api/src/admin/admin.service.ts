@@ -175,6 +175,8 @@ export class AdminService {
         passwordHash,
         displayName: dto.displayName.trim(),
         status: UserStatus.ACTIVE,
+        // The creator chose this password, so the new user must replace it at first login.
+        forcePasswordChange: true,
         employeeId: dto.employeeId,
         userRoles: { create: [{ roleId: role.id }] },
       },

@@ -86,6 +86,16 @@ services:
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_LOGIN_ID: ${BOOTSTRAP_ADMIN_LOGIN_ID:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      # Mobile OTP login (off unless SMS_PROVIDER=msg91 and its credentials are set)
+      SMS_PROVIDER: ${SMS_PROVIDER:-}
+      MSG91_AUTH_KEY: ${MSG91_AUTH_KEY:-}
+      MSG91_OTP_TEMPLATE_ID: ${MSG91_OTP_TEMPLATE_ID:-}
+      MSG91_OTP_VAR: ${MSG91_OTP_VAR:-otp}
+      OTP_HASH_SECRET: ${OTP_HASH_SECRET:-}
+      # AI assistant (optional; empty key = built-in rules engine, nothing sent to OpenAI)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      AI_SYSTEM_PROMPT: ${AI_SYSTEM_PROMPT:-}
     volumes:
       - eitf_uploads:/app/apps/api/uploads
       - eitf_backups:/app/apps/api/data

@@ -259,10 +259,17 @@ model OtpChallenge {
   expiresAt   DateTime  @map("expires_at")
   consumedAt  DateTime? @map("consumed_at")
   createdAt   DateTime  @default(now()) @map("created_at")
+  /// Client IP that requested the OTP (per-IP rate limiting).
+  requestIp         String? @map("request_ip")
+  /// not_sent (unregistered / ineligible number) | queued | sent | failed
+  smsStatus         String? @map("sms_status")
+  providerMessageId String? @map("provider_message_id")
 
   user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([companyId, mobile])
+  @@index([companyId, mobile, createdAt])
+  @@index([requestIp, createdAt])
   @@map("otp_challenges")
 }
 

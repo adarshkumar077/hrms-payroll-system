@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { acceptSession, api, initSession, logout, SessionUser } from '@/lib/api';
+import { acceptSession, api, ApiError, initSession, logout, SessionUser } from '@/lib/api';
 import { getHomePathForUser } from '@/lib/home';
 
 type LoginMode = 'password' | 'otp';
@@ -17,8 +17,12 @@ export default function LoginPage() {
   const [mobile, setMobile] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
-  // Local development only: the API returns the code when OTP_SHOW_IN_UI=true (no SMS gateway).
-  const [devOtp, setDevOtp] = useState<string | null>(null);
+  const [otpInfo, setOtpInfo] = useState('');
+  // null = unknown (status not loaded yet); false = no SMS provider configured on the server.
+  const [otpEnabled, setOtpEnabled] = useState<boolean | null>(null);
+  const [otpConfigError, setOtpConfigError] = useState('');
+  const [resendIn, setResendIn] = useState(0);
+  const [expiresIn, setExpiresIn] = useState(0);
   const [totpCode, setTotpCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -44,6 +48,40 @@ export default function LoginPage() {
       cancelled = true;
     };
   }, [router]);
+
+  useEffect(() => {
+    if (mode !== 'otp' || otpEnabled !== null) return;
+    api<{ enabled: boolean; configurationError?: string }>('/auth/otp/status', {
+      auth: false,
+      retries: 0,
+      timeoutMs: 3000,
+    })
+      .then((res) => {
+        setOtpEnabled(Boolean(res.enabled));
+        setOtpConfigError(res.enabled ? '' : res.configurationError ?? 'Mobile OTP login is not configured on this server.');
+      })
+      .catch(() => {
+        setOtpEnabled(false);
+        setOtpConfigError('Could not reach the server to check Mobile OTP login. Please try again later.');
+      });
+  }, [mode, otpEnabled]);
+
+  // One ticking clock drives both the resend cooldown and the OTP expiry countdown.
+  useEffect(() => {
+    if (resendIn <= 0 && expiresIn <= 0) return;
+    const t = window.setTimeout(() => {
+      setResendIn((s) => Math.max(0, s - 1));
+      setExpiresIn((s) => Math.max(0, s - 1));
+    }, 1000);
+    return () => window.clearTimeout(t);
+  }, [resendIn, expiresIn]);
+
+  const otpExpired = otpSent && expiresIn <= 0;
+  const maskedMobile = (() => {
+    const d = mobile.replace(/\D/g, '').slice(-10);
+    return d.length === 10 ? `+91 ******${d.slice(-4)}` : '';
+  })();
+  const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
   useEffect(() => {
     // Show login form immediately; refine setup mode in background.
@@ -130,19 +168,35 @@ export default function LoginPage() {
     }
   }
 
-  async function onRequestOtp(e: React.FormEvent) {
-    e.preventDefault();
+  async function onRequestOtp(e?: React.FormEvent) {
+    e?.preventDefault();
     setError('');
+    if (resendIn > 0) return;
     setLoading(true);
     try {
-      const res = await api<{ devCode?: string }>('/auth/otp/request', {
-        method: 'POST',
-        auth: false,
-        body: JSON.stringify({ mobile }),
-      });
-      setDevOtp(res?.devCode ?? null);
+      const res = await api<{ message: string; resendAfterSeconds?: number; expiresInSeconds?: number }>(
+        '/auth/otp/request',
+        {
+          method: 'POST',
+          auth: false,
+          retries: 0,
+          body: JSON.stringify({ mobile: mobile.trim() }),
+        },
+      );
+      setOtp('');
+      setOtpInfo(res?.message ?? 'If this mobile number is registered for employee login, an OTP has been sent.');
+      setResendIn(res?.resendAfterSeconds ?? 30);
+      setExpiresIn(res?.expiresInSeconds ?? 300);
       setOtpSent(true);
     } catch (err) {
+      const wait = err instanceof Error ? err.message.match(/wait (\d+) seconds/i) : null;
+      if (wait) setResendIn(Number(wait[1]));
+      if (err instanceof ApiError && err.status === 503) {
+        // Server says SMS is not configured: show the configuration error, never "OTP sent".
+        setOtpEnabled(false);
+        setOtpConfigError(err.message);
+        return;
+      }
       setError(err instanceof Error ? err.message : 'OTP request failed');
     } finally {
       setLoading(false);
@@ -161,22 +215,26 @@ export default function LoginPage() {
       }>('/auth/otp/verify', {
         method: 'POST',
         auth: false,
-        body: JSON.stringify({ mobile, code: otp, totpCode: totpCode || undefined }),
+        retries: 0,
+        body: JSON.stringify({ mobile: mobile.trim(), code: otp.trim(), totpCode: totpCode || undefined }),
       });
       const nextUser = acceptSession(data);
       router.push(
         nextUser.forcePasswordChange ? '/account/password?required=true' : getHomePathForUser(nextUser),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'OTP verify failed');
+      const msg = err instanceof Error ? err.message : 'OTP verification failed';
+      // Expired / used up / too many attempts: this OTP can no longer be used.
+      if (/expired|request a new OTP/i.test(msg)) setExpiresIn(0);
+      setError(msg);
     } finally {
       setLoading(false);
     }
   }
 
   const tabs: { key: LoginMode; label: string }[] = [
-    { key: 'password', label: 'User ID / Email' },
-    { key: 'otp', label: 'Mobile OTP' },
+    { key: 'password', label: 'Password Login' },
+    { key: 'otp', label: 'Mobile OTP Login' },
   ];
 
   return (
@@ -395,33 +453,81 @@ export default function LoginPage() {
           )}
 
           {mode === 'otp' && (
-            <form onSubmit={otpSent ? onVerifyOtp : onRequestOtp} className="card p-6 space-y-4">
+            <form onSubmit={otpSent ? onVerifyOtp : onRequestOtp} className="card p-4 sm:p-6 space-y-4">
+              <p className="text-xs text-ink-500">For employee accounts. Admin and HR users sign in with User ID and password.</p>
+              {otpEnabled === false && otpConfigError && (
+                <div role="alert" className="text-sm text-danger bg-danger-light/50 rounded-xl px-3 py-2">
+                  <p className="font-medium">SMS provider not configured</p>
+                  <p className="mt-0.5">{otpConfigError}</p>
+                </div>
+              )}
               <label className="block">
                 <span className="text-sm font-medium text-ink-700">Mobile number</span>
-                <input className="input mt-1.5" value={mobile} onChange={(e) => setMobile(e.target.value)} required />
+                <input
+                  className="input mt-1.5"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="10-digit mobile number"
+                  maxLength={15}
+                  value={mobile}
+                  disabled={otpSent}
+                  onChange={(e) => setMobile(e.target.value.replace(/[^\d+\s-]/g, ''))}
+                  required
+                />
               </label>
               {otpSent && (
                 <>
-                  {devOtp && (
-                    <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                      <span className="font-medium">Development mode:</span> your OTP is{' '}
-                      <button
-                        type="button"
-                        className="font-mono text-base font-semibold tracking-widest underline"
-                        onClick={() => setOtp(devOtp)}
-                        title="Fill the OTP field"
-                      >
-                        {devOtp}
-                      </button>
-                      <span className="block text-xs text-amber-800">
-                        Shown because no SMS gateway is configured. Never enabled in production.
-                      </span>
+                  {otpInfo && !otpExpired && (
+                    <div role="status" className="text-sm text-emerald-800 bg-emerald-50 rounded-xl px-3 py-2">
+                      <p className="font-medium">OTP sent{maskedMobile ? ` to ${maskedMobile}` : ''}</p>
+                      <p className="mt-0.5">
+                        {otpInfo} It expires in <span className="font-mono">{mmss(expiresIn)}</span>.
+                      </p>
                     </div>
+                  )}
+                  {otpExpired && !error && (
+                    <p role="alert" className="text-sm text-amber-900 bg-amber-50 rounded-xl px-3 py-2">
+                      This OTP has expired. Please request a new OTP.
+                    </p>
                   )}
                   <label className="block">
                     <span className="text-sm font-medium text-ink-700">OTP code</span>
-                    <input className="input mt-1.5" value={otp} onChange={(e) => setOtp(e.target.value)} required />
+                    <input
+                      className="input mt-1.5 tracking-widest"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      pattern="\d{6}"
+                      maxLength={6}
+                      placeholder="6-digit OTP"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      required
+                    />
                   </label>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <button
+                      type="button"
+                      className="text-ink-500 hover:text-ink-700"
+                      onClick={() => {
+                        setOtpSent(false);
+                        setOtp('');
+                        setOtpInfo('');
+                        setExpiresIn(0);
+                        setError('');
+                      }}
+                    >
+                      Change number
+                    </button>
+                    <button
+                      type="button"
+                      disabled={resendIn > 0 || loading}
+                      className="font-medium text-brand-700 disabled:text-ink-400"
+                      onClick={() => void onRequestOtp()}
+                    >
+                      {resendIn > 0 ? `Resend OTP in ${resendIn}s` : 'Resend OTP'}
+                    </button>
+                  </div>
                   <label className="block">
                     <span className="text-sm font-medium text-ink-700">2FA code <span className="text-ink-400 font-normal">(optional)</span></span>
                     <input className="input mt-1.5" value={totpCode} onChange={(e) => setTotpCode(e.target.value)} />
@@ -429,8 +535,23 @@ export default function LoginPage() {
                 </>
               )}
               {error && <p className="text-sm text-danger bg-danger-light/50 rounded-xl px-3 py-2">{error}</p>}
-              <button type="submit" disabled={loading} className="btn-primary w-full py-3">
-                {loading ? 'Please wait…' : otpSent ? 'Verify OTP' : 'Send OTP'}
+              <button
+                type="submit"
+                disabled={
+                  loading ||
+                  otpEnabled !== true ||
+                  (!otpSent && resendIn > 0) ||
+                  (otpSent && (otpExpired || otp.length !== 6))
+                }
+                className="btn-primary w-full py-3"
+              >
+                {loading
+                  ? 'Please wait…'
+                  : otpSent
+                    ? 'Verify OTP'
+                    : resendIn > 0
+                      ? `Send OTP in ${resendIn}s`
+                      : 'Send OTP'}
               </button>
             </form>
           )}

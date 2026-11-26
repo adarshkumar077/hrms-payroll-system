@@ -59,6 +59,12 @@ export class LibraryDocumentsService {
     if (this.access(user) === 'OWN' && meta.folder !== 'EMPLOYEE') {
       throw new ForbiddenException();
     }
+    if (this.access(user) === 'OWN') {
+      // Employees can only file documents against their own profile.
+      if (!user.employeeId) throw new ForbiddenException('No employee profile linked');
+      if (meta.employeeId && meta.employeeId !== user.employeeId) throw new ForbiddenException();
+      meta = { ...meta, employeeId: user.employeeId };
+    }
     assertSafeUpload(file);
     const saved = await this.storage.save(user.companyId, 'library', file.originalname, file.buffer);
     const doc = await this.prisma.libraryDocument.create({
@@ -98,6 +104,7 @@ export class LibraryDocumentsService {
 
   async rename(user: AuthUser, id: string, title: string) {
     const doc = await this.get(user, id);
+    if (this.access(user) === 'OWN' && doc.uploadedBy !== user.id) throw new ForbiddenException();
     return this.prisma.libraryDocument.update({ where: { id: doc.id }, data: { title } });
   }
 

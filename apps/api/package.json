@@ -18,7 +18,8 @@
     "prisma:bootstrap-super-admin": "tsx --import dotenv/config prisma/bootstrap-super-admin.ts",
     "prisma:studio": "prisma studio",
     "demo:seed": "node scripts/demo/seed-demo.cjs",
-    "db:migrate-selfies": "tsx --import dotenv/config prisma/migrate-selfies-to-storage.ts"
+    "db:migrate-selfies": "tsx --import dotenv/config prisma/migrate-selfies-to-storage.ts",
+    "test:e2e:otp": "node --test --test-concurrency=1 test/otp-login.e2e.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1169.0",

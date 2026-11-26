@@ -64,7 +64,7 @@ export class DataExchangeController {
   }
 
   @Post('export/:entity')
-  @Roles(RoleCode.SUPER_ADMIN, RoleCode.ADMIN, RoleCode.HR, RoleCode.EMPLOYEE)
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.ADMIN, RoleCode.HR)
   async export(
     @CurrentUser() user: AuthUser,
     @Param('entity') entity: string,

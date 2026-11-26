@@ -1,0 +1,25 @@
+# EITF HRMS — HTTPS by server IP (LAN / intranet deployment, option C).
+#
+# Layers on top of docker-compose.yml:
+#   * nginx serves the app on 443 with certificates from ./deploy/certs (make them with
+#     deploy/ip-https/make-certs.sh <SERVER_IP>); port 80 only redirects to HTTPS.
+#   * nginx can be bound to one network interface (NGINX_BIND_IP), e.g. the LAN address.
+#
+# Enable it on the server by adding to .env.production (read by deploy/up.sh and the systemd unit):
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.ip-https.yml
+#   PUBLIC_HTTP_PORT=80
+#   PUBLIC_HTTPS_PORT=443
+#   NGINX_BIND_IP=<SERVER_IP>        (optional; default 0.0.0.0 = all interfaces)
+# Or explicitly:
+#   docker compose -f docker-compose.yml -f docker-compose.ip-https.yml --env-file .env.production up -d --build
+#
+# PostgreSQL, Redis, the API and the web app stay unpublished (internal Docker network only).
+services:
+  nginx:
+    volumes:
+      # Same container path as the base file, so this replaces deploy/nginx/conf.d.
+      - ./deploy/nginx/ip-https:/etc/nginx/conf.d:ro
+      - ./deploy/certs:/etc/nginx/certs:ro
+    ports: !override
+      - "${NGINX_BIND_IP:-0.0.0.0}:${PUBLIC_HTTP_PORT:-80}:80"
+      - "${NGINX_BIND_IP:-0.0.0.0}:${PUBLIC_HTTPS_PORT:-443}:443"

@@ -40,3 +40,9 @@ deploy/backup/rclone/
 
 # Local-only notes/credentials (e.g. DEMO-LOGINS.local.md)
 *.local.md
+
+# Local database backups (never commit or ship in images)
+backups/
+
+# HTTPS certificates and the private CA key (deploy/ip-https/make-certs.sh)
+deploy/certs/

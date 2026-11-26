@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Post, Query } from '@nestjs/common';
+import { isPrivileged } from '../common/authorization.util';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RoleCode, WorkflowType } from '@prisma/client';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -57,8 +58,16 @@ export class WorkflowController {
 
   @Get('approvals/:id')
   @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR, RoleCode.ADMIN, RoleCode.ADMIN, RoleCode.EMPLOYEE)
-  get(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.workflow.getInstance(user.companyId, id);
+  async get(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const row = await this.workflow.getInstance(user.companyId, id);
+    // Visible to privileged users, the requester, and whoever may act on the current step.
+    const step = row.workflow.steps.find((s) => s.stepOrder === row.currentStepOrder);
+    const isCurrentApprover = Boolean(step && user.roles.includes(step.approverRole.toUpperCase()));
+    const isRequester = Boolean(user.employeeId && row.requesterId === user.employeeId);
+    if (!isPrivileged(user) && !isRequester && !isCurrentApprover) {
+      throw new ForbiddenException('You can only view your own requests');
+    }
+    return row;
   }
 
   @Post('approvals/:instanceId/act')

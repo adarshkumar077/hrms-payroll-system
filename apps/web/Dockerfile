@@ -10,6 +10,10 @@ FROM node:20-bookworm-slim AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package.json ./package.json
+# The lockfile marks /app as the monorepo root for Next.js output tracing, so the standalone build
+# lands at apps/web/server.js (matching CMD and the static/public paths below). Without it the
+# server is emitted at /app/server.js and the container cannot start.
+COPY package-lock.json ./package-lock.json
 COPY apps/web ./apps/web
 COPY package.json ./
 WORKDIR /app/apps/web
