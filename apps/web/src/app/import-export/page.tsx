@@ -71,6 +71,13 @@ export default function ImportExportPage() {
       {!employeeOnly && (
         <ModuleSection>
           <p className="font-medium">Import (Excel / CSV)</p>
+          {entity === 'employees' && (
+            <p className="text-sm mt-1">
+              Employee records are imported through{' '}
+              <a className="text-brand-600 underline" href="/employee-import">Secure employee import</a> (validation,
+              preview and Super Admin approval). Bulk import here is dry-run only.
+            </p>
+          )}
           <a className="text-sm text-brand-600" href={`/api/v1/import/templates/${entity}`}>Download template</a>
           <input className="block mt-2" type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           <div className="flex gap-2 mt-2">

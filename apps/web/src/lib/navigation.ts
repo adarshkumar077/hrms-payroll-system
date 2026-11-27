@@ -161,6 +161,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { id: 'setup-integrations', label: 'Integrations', href: '/integrations', icon: 'integrations', adminRoles: ['SUPER_ADMIN', 'ADMIN'] },
       { id: 'library-docs', label: 'Documents', href: '/documents', icon: 'documents', employee: true, adminRoles: ['SUPER_ADMIN', 'ADMIN', 'HR'] },
       // Admin-only: the import/export API is restricted to Super Admin, Admin and HR.
+      { id: 'employee-import', label: 'Secure Employee Import', href: '/employee-import', icon: 'import', adminRoles: ['SUPER_ADMIN', 'ADMIN', 'HR'] },
       { id: 'import-export', label: 'Import / Export', href: '/import-export', icon: 'import', adminRoles: ['SUPER_ADMIN', 'ADMIN', 'HR'] },
       { id: 'admin-users', label: 'Admin & Users', href: '/admin/users', icon: 'users', adminRoles: ['SUPER_ADMIN', 'ADMIN'] },
     ],
@@ -292,7 +293,7 @@ export function canAccessPath(user: SessionUser, pathname: string): boolean {
   }
   if (pathname === '/assistant') return true;
   if (pathname === '/documents' || pathname.startsWith('/documents/')) return true;
-  if (pathname === '/import-export') {
+  if (pathname === '/import-export' || pathname === '/employee-import') {
     return isAdmin(user) || isSuperAdmin(user) || hasAnyRole(user, ['HR']);
   }
   if (pathname === '/integrations' || pathname.startsWith('/integrations/')) {

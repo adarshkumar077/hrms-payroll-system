@@ -58,6 +58,13 @@ export class DataExchangeService {
     opts: { dryRun?: boolean; mapping?: Record<string, string> },
   ) {
     this.assertImport(user, entity);
+    // Employee master data must go through the validated import (mandatory unique mobile + email,
+    // preview, backup confirmation, Super Admin approval). This generic CSV path skipped all of that.
+    if (entity === 'employees' && !opts.dryRun) {
+      throw new BadRequestException(
+        'Employee records can only be imported through Employees → Secure import (preview + Super Admin approval).',
+      );
+    }
     const cols = TEMPLATES[entity];
     if (!cols) throw new BadRequestException('Unknown entity');
     const rows = this.parseCsv(csv);
