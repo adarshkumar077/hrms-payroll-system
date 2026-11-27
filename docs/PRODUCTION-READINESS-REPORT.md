@@ -1,5 +1,7 @@
 # EITF HRMS & Payroll: Phase 2 production readiness report
 
+> **Superseded (27 Nov 2026):** MSG91 SMS OTP was removed. OTP codes are now sent by email over SMTP — see [`EMAIL_OTP_SETUP.md`](EMAIL_OTP_SETUP.md) and [`PROJECT_FINAL_STATUS.md`](PROJECT_FINAL_STATUS.md). The MSG91 sections below are kept only as a historical record.
+
 **Date:** 26 Nov 2026 · **Environment:** isolated Docker test stack `eitf-p1test` on the development PC
 (production images, HTTPS by IP with a test company CA, fresh test database). The development
 database, the other EITF Docker stack (`C:\Users\Aadarsh\Projects\eitf-hrms`) and any server were

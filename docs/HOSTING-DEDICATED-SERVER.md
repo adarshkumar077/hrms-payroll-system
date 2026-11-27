@@ -37,7 +37,7 @@ Contents
 | An off-site backup bucket (Cloudflare R2, Backblaze B2 or AWS S3) | You | Required for disaster recovery |
 | A Chartered Accountant to verify the statutory payroll rules | You | **Mandatory before the first live payroll** |
 | Expo, Apple Developer and Google Play accounts | You | Only for the mobile app |
-| An SMS provider (for example MSG91 with DLT registration) | You | MSG91 integration is built in; it needs your MSG91 credentials and DLT-approved OTP template ([`SMS-OTP-LOGIN.md`](SMS-OTP-LOGIN.md)) |
+| An SMTP mailbox for OTP emails (company mail, Google Workspace, Microsoft 365, Zoho, Amazon SES, Brevo …) | You | Email OTP is built in; it needs SMTP host, port, user, password and a From address ([`EMAIL_OTP_SETUP.md`](EMAIL_OTP_SETUP.md)) |
 | An IT person for about 2 hours per week | You | See the operations checklist in [Section 8](#8-monitoring-and-operations) |
 
 **Indicative monthly running cost in India (INR).** These are planning ranges, not quotes. Check current prices.
@@ -304,7 +304,7 @@ Then edit by hand (`nano .env.production`):
 | `LOAD_TEST_USER`, `LOAD_TEST_PASS` | empty, or a real admin login | Only used by the smoke/load/soak scripts, which refuse to run without them |
 | `COMPOSE_PROFILES` | `tunnel` (option A), `ssl` (option B) or empty (option C) | Read by the systemd unit to decide which optional containers to start |
 
-Mobile OTP login is configured with `SMS_PROVIDER=msg91`, `MSG91_AUTH_KEY`, `MSG91_OTP_TEMPLATE_ID` and `OTP_HASH_SECRET` (all forwarded by `docker-compose.yml`). Leave `SMS_PROVIDER` empty to keep it off. See [`docs/SMS-OTP-LOGIN.md`](SMS-OTP-LOGIN.md). The former `OTP_SHOW_IN_UI` setting has been removed from the code and has no effect.
+Mobile OTP login sends the code to the employee's **registered email** over SMTP. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, `SUPPORT_CONTACT` and `OTP_HASH_SECRET` (all forwarded by `docker-compose.yml`). Leave `SMTP_HOST` empty to keep it off. See [`docs/EMAIL_OTP_SETUP.md`](EMAIL_OTP_SETUP.md). No SMS provider is used.
 
 Finally confirm the file is not tracked by git: `git status --short` must not list `.env.production`, and `ls -l .env.production` must show `-rw-------`.
 
@@ -810,7 +810,7 @@ The company's own Expo, Apple Developer and Google Play accounts must own the ap
 | Cloudflare | DNS, Tunnel, optionally R2 | Company account with 2FA and a second admin |
 | Backup storage (R2 / B2 / S3) | Off-site encrypted backups, optional file storage | Company account |
 | Expo, Apple Developer, Google Play | Mobile builds and store listings | Company accounts |
-| SMS provider (for example MSG91, with DLT registration) | Mobile OTP login (once integrated) | Company account |
+| SMTP mailbox (OTP emails and system alerts) | Mobile OTP login, `ALERT_EMAILS` monitoring | Company account |
 | Git hosting | Source and tags | Company account |
 | Password manager | `.env.production` copy, age key, rclone config | Shared vault with at least two people |
 
@@ -818,7 +818,7 @@ The company's own Expo, Apple Developer and Google Play accounts must own the ap
 
 From `AUDIT-REPORT.md` (addendum), `docs/PAYROLL-RULES.md` and the code:
 
-- **SMS OTP needs credentials.** Mobile OTP login (employee accounts only) is integrated with MSG91 but stays switched off until `SMS_PROVIDER=msg91`, `MSG91_AUTH_KEY`, `MSG91_OTP_TEMPLATE_ID` and `OTP_HASH_SECRET` are set, which requires a DLT-registered sender and an approved OTP template. Until then the login screen tells employees to use User ID + password. See [`SMS-OTP-LOGIN.md`](SMS-OTP-LOGIN.md). The mobile app's login screen has not been changed.
+- **Email OTP needs SMTP credentials.** Mobile OTP login (employee accounts only) emails the code to the employee's registered address and stays switched off until `SMTP_HOST` and a valid `SMTP_FROM_EMAIL` are set. Until then the login screen tells employees to use User ID + password. See [`EMAIL_OTP_SETUP.md`](EMAIL_OTP_SETUP.md).
 - **Only a Super Admin can open the payroll run pages.** The payroll run endpoints (`payroll/runs`, generate, approve) are restricted to the `SUPER_ADMIN` role in `apps/api/src/payroll/payroll.controller.ts`. HR can configure salaries but cannot open the payroll run page. Plan who approves payroll accordingly.
 - **Statutory rules are unverified until your CA signs off**, and there is no UI to edit them (SQL update on `statutory_rule_sets`).
 - Payroll limitations (`docs/PAYROLL-RULES.md`): old-regime senior and super-senior slabs not modelled; no 80C cap or itemised Chapter VI-A heads, HRA exemption and perquisites not computed; previous-employer income (Form 12B) not captured; PF EDLI and admin charges not computed; ESI daily-wage rule not modelled; only seven states have professional-tax slabs seeded (MH, KA, WB, TN, TS, AP, GJ); salary-structure-only employees bypass the statutory engine; the attendance payroll export is a steady-state estimate and the payroll run is the source of truth.

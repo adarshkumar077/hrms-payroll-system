@@ -39,7 +39,7 @@ reach the app. Docker's documented place for such rules is the `DOCKER-USER` ipt
 
 ```bash
 #!/bin/sh
-# Only <OFFICE_SUBNET> may reach Docker-published ports on <IFACE>. Container egress (MSG91,
+# Only <OFFICE_SUBNET> may reach Docker-published ports on <IFACE>. Container egress (SMTP,
 # backup bucket, OS updates) and its replies are unaffected.
 set -e
 iptables -N DOCKER-USER 2>/dev/null || true
