@@ -7,6 +7,7 @@ import { MoneySerializeInterceptor } from './common/money-serialize.interceptor'
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { MailModule } from './mail/mail.module';
+import { RATE_LIMITS } from './common/rate-limits';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { EmployeeImportModule } from './employee-import/employee-import.module';
 import { CompanyModule } from './company/company.module';
@@ -40,7 +41,10 @@ import { Require2faGuard } from './security/require-2fa.guard';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    // General per-IP limit. A whole office behind one router shares a single public IP, so this
+    // must cover everyone's normal traffic (50 users opening dashboards ≈ 400 requests in a burst).
+    // Login / OTP endpoints keep their own much stricter @Throttle limits.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: RATE_LIMITS.generalPerMinute }]),
     PrismaModule,
     AuditModule,
     MailModule,

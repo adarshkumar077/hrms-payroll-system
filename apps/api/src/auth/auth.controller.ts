@@ -1,7 +1,10 @@
+import { RATE_LIMITS } from '../common/rate-limits';
+import { FailedLoginLimiter } from './failed-login-limiter';
 import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Post,
@@ -47,6 +50,8 @@ import {
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
+  private readonly failedLogins = new FailedLoginLimiter();
+
   constructor(
     private readonly auth: AuthService,
     private readonly config: ConfigService,
@@ -59,7 +64,7 @@ export class AuthController {
     };
   }
 
-  /** Whether mobile OTP login is available (an SMS provider is configured). */
+  /** Whether mobile OTP login is available (email/SMTP is configured). */
   @Public()
   @Get('otp/status')
   otpStatus() {
@@ -67,14 +72,14 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Throttle({ default: { limit: RATE_LIMITS.otpRequestPerMinute, ttl: 60_000 } })
   @Post('otp/request')
   requestOtp(@Body() dto: RequestOtpDto, @Req() req: Request) {
     return this.auth.requestOtp(dto, req.ip);
   }
 
   @Public()
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: RATE_LIMITS.otpVerifyPerMinute, ttl: 60_000 } })
   @Post('otp/verify')
   async verifyOtp(
     @Body() dto: VerifyOtpDto,
@@ -107,19 +112,26 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: RATE_LIMITS.loginPerMinute, ttl: 60_000 } })
   @Post('login')
   async login(
     @Body() dto: LoginPasswordDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    return deliverSession(req, res, this.config, await this.auth.loginPassword(dto, this.meta(req)));
+    const ip = req.ip ?? 'unknown';
+    this.failedLogins.assertAllowed(ip);
+    try {
+      return deliverSession(req, res, this.config, await this.auth.loginPassword(dto, this.meta(req)));
+    } catch (e) {
+      if (e instanceof UnauthorizedException || e instanceof ForbiddenException) this.failedLogins.recordFailure(ip);
+      throw e;
+    }
   }
 
   @Public()
   @AllowDuringPasswordChange()
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Throttle({ default: { limit: RATE_LIMITS.refreshPerMinute, ttl: 60_000 } })
   @Post('refresh')
   async refresh(
     @Body() dto: RefreshTokenDto,

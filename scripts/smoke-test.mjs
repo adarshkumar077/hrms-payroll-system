@@ -33,6 +33,7 @@ async function main() {
   console.log(`\n=== Production Smoke Test ===\n${base}\n`);
 
   let token = '';
+let hasEmployee = false;
   await ok('HTTPS health', async () => {
     const r = await fetch(`${base}/api/v1/health`);
     if (!r.ok) throw new Error(String(r.status));
@@ -54,19 +55,21 @@ async function main() {
     if (!r.ok) throw new Error(String(r.status));
     const j = await r.json();
     token = j.accessToken;
+    hasEmployee = Boolean(j.user?.employeeId);
     if (!token) throw new Error('no token');
   });
 
   const h = { Authorization: `Bearer ${token}` };
   const routes = [
     ['Dashboard HR', '/dashboard/hr'],
-    ['Employees', '/employees?take=10'],
+    ['Employees', '/employees?pageSize=10'],
     ['Payroll runs', '/payroll/runs'],
     ['Leave balances', '/me/leave/balances'],
     ['Attendance summary', '/me/attendance/summary'],
   ];
 
-  for (const [name, path] of routes) {
+  // Self-service (/me) routes need a login linked to an employee record.
+  for (const [name, path] of routes.filter(([, p]) => hasEmployee || !p.startsWith('/me/'))) {
     await ok(name, async () => {
       const r = await fetch(`${base}/api/v1${path}`, { headers: h });
       if (!r.ok) throw new Error(String(r.status));

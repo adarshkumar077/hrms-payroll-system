@@ -26,6 +26,8 @@ async function timed(label, fn) {
   }
 }
 
+let hasEmployee = false;
+
 async function login() {
   const res = await fetch(`${base}/api/v1/auth/login`, {
     method: 'POST',
@@ -37,6 +39,8 @@ async function login() {
     throw new Error(`login ${res.status}: ${body.slice(0, 120)}`);
   }
   const data = await res.json();
+  // Self-service (/me/*) calls need a login linked to an employee record.
+  hasEmployee = Boolean(data.user?.employeeId);
   return data.accessToken;
 }
 
@@ -64,7 +68,7 @@ async function main() {
     ['health', () => fetch(`${base}/api/v1/health`).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
     ['dashboard-hr', () => fetch(`${base}/api/v1/dashboard/hr`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
     ['dashboard-employee', () => fetch(`${base}/api/v1/dashboard/employee`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
-    ['employees', () => fetch(`${base}/api/v1/employees?take=50`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
+    ['employees', () => fetch(`${base}/api/v1/employees?pageSize=50`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
     ['attendance-console', () => fetch(`${base}/api/v1/attendance/console?date=${today}`, { headers }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })],
     ['attendance-punch-in', () => fetch(`${base}/api/v1/me/attendance/mark`, { method: 'POST', headers, body: JSON.stringify({ type: 'IN' }) }).then((r) => { if (!r.ok && r.status !== 409) throw new Error(String(r.status)); })],
     ['attendance-punch-out', () => fetch(`${base}/api/v1/me/attendance/mark`, { method: 'POST', headers, body: JSON.stringify({ type: 'OUT' }) }).then((r) => { if (!r.ok && r.status !== 409) throw new Error(String(r.status)); })],
@@ -77,9 +81,11 @@ async function main() {
   ];
 
   const started = performance.now();
+  const active = hasEmployee ? tests : tests.filter(([label]) => !/^(attendance-punch|leave-balances|profile|dashboard-employee)/.test(label));
+  if (!hasEmployee) console.log('Login has no employee record: skipping self-service (/me) calls.\n');
   const jobs = Array.from({ length: concurrency }, async (_, i) => {
     const results = [];
-    for (const [label, fn] of tests) {
+    for (const [label, fn] of active) {
       results.push(await timed(`u${i + 1}:${label}`, fn));
     }
     return results;

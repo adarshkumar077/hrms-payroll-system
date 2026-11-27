@@ -297,6 +297,9 @@ async function startApi() {
       DATABASE_URL: TEST_DB_URL,
       API_PORT: String(API_PORT),
       COOKIE_SECURE: 'false',
+      // Pin strict per-IP limits so the rate-limit cases below exercise them.
+      OTP_REQUEST_LIMIT_PER_MINUTE: '5',
+      OTP_MAX_PER_IP_PER_HOUR: '30',
       REDIS_URL: '',
       SMTP_HOST: '127.0.0.1',
       SMTP_PORT: String(MOCK_PORT),

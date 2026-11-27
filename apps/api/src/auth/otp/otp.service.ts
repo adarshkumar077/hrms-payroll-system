@@ -1,3 +1,4 @@
+import { RATE_LIMITS } from '../../common/rate-limits';
 import {
   BadRequestException,
   HttpException,
@@ -27,7 +28,7 @@ export const OTP_RESEND_COOLDOWN_SECONDS = 30;
 export const OTP_MAX_VERIFY_ATTEMPTS = 5;
 export const OTP_MAX_PER_MOBILE_PER_HOUR = 5;
 export const OTP_MAX_PER_MOBILE_PER_DAY = 10;
-export const OTP_MAX_PER_IP_PER_HOUR = 30;
+export const OTP_MAX_PER_IP_PER_HOUR = RATE_LIMITS.otpRequestPerIpPerHour;
 
 export const OTP_SENT_MESSAGE =
   'If this mobile number is registered for employee login, an OTP has been sent to the email address registered with HR.';
