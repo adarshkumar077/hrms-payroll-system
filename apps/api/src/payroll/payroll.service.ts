@@ -642,8 +642,6 @@ export class PayrollService {
 
     const year = run.year;
     const month = run.month;
-    const esdEnabled = await this.setting(user.companyId, 'esd.enabled', false);
-    const esdAmount = await this.setting(user.companyId, 'esd.monthly_amount', 0);
     const interestRate = await this.setting(user.companyId, 'esd.interest_rate_annual', 0);
 
     await this.prisma.$transaction(async (tx) => {
@@ -698,13 +696,19 @@ export class PayrollService {
           }
         }
 
-        // ESD deposit + simple monthly interest on balance
-        if (esdEnabled && esdAmount > 0) {
+        // ESD deposit + monthly interest on balance. The ledger records exactly what THIS payslip
+        // deducted as ESD (company default or the employee's own config). Previously it posted the
+        // company default for every line, crediting deposits that were never deducted.
+        const esdDeducted = M.sumBy(
+          deductions.filter((d) => d.code === 'ESD'),
+          (d) => d.amount,
+        );
+        if (esdDeducted.greaterThan(0)) {
           const last = await tx.esdLedgerEntry.findFirst({
             where: { employeeId: line.employeeId },
             orderBy: { createdAt: 'desc' },
           });
-          const deposit = M.round2(esdAmount);
+          const deposit = M.round2(esdDeducted);
           let bal = M.money(last?.balanceAfter).plus(deposit);
           await tx.esdLedgerEntry.create({
             data: {

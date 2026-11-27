@@ -331,18 +331,19 @@ export class SecurityService {
       const enabled = await this.getSettingBool(c.id, 'security.backup_enabled', true);
       if (!enabled) continue;
       try {
-        await this.prisma.backupRun.create({
-          data: {
+        // Previously this only inserted a SUCCESS row with 0 bytes and no file (false assurance).
+        // Now it runs the real backup unless one already succeeded in the last 20 hours.
+        const recent = await this.prisma.backupRun.findFirst({
+          where: {
             companyId: c.id,
             status: BackupRunStatus.SUCCESS,
-            trigger: 'auto',
-            sizeBytes: 0,
-            storagePath: join(process.cwd(), 'data', 'backups', c.id, `auto-${new Date().toISOString().replace(/[:.]/g, '-')}.json`),
-            finishedAt: new Date(),
-            createdBy: null,
+            sizeBytes: { gt: 0 },
+            startedAt: { gte: new Date(Date.now() - 20 * 60 * 60 * 1000) },
           },
         });
-        this.logger.log(`Daily auto-backup record created for company ${c.id}`);
+        if (recent) continue;
+        await this.runBackup(c.id, 'schedule');
+        this.logger.log(`Daily auto-backup completed for company ${c.id}`);
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Auto-backup failed';
         this.logger.error(`Daily auto-backup failed for company ${c.id}: ${msg}`);
