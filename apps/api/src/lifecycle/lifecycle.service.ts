@@ -1,9 +1,13 @@
+import { ConfigService } from '@nestjs/config';
+import { MailService, isDeliverableEmail, maskEmail } from '../mail/mail.service';
 import {
   BadRequestException,
   ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
+  ServiceUnavailableException,
   forwardRef,
 } from '@nestjs/common';
 import {
@@ -66,6 +70,8 @@ export class LifecycleService {
     private readonly storage: StorageService,
     @Inject(forwardRef(() => WorkflowService))
     private readonly workflow: WorkflowService,
+    @Optional() private readonly mail?: MailService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   private isHr(user: AuthUser) {
@@ -112,7 +118,7 @@ export class LifecycleService {
             completedBy: actorId,
             note:
               t.code === 'WELCOME_EMAIL'
-                ? 'Queued (console notification stub)'
+                ? 'Pending: send it from Onboarding when the employee should start using the portal'
                 : undefined,
           })),
         },
@@ -120,17 +126,8 @@ export class LifecycleService {
       include: { tasks: { orderBy: { sortOrder: 'asc' } } },
     });
 
-    // Mark welcome email task as done with stub note (Module 25 later)
-    await this.prisma.onboardingTask.updateMany({
-      where: { checklistId: checklist.id, code: 'WELCOME_EMAIL' },
-      data: {
-        status: OnboardingTaskStatus.DONE,
-        completedAt: new Date(),
-        note: `Welcome stub for ${emp.email ?? emp.mobile ?? emp.employeeCode}`,
-        completedBy: actorId,
-      },
-    });
-
+    // The welcome email is NOT sent automatically (an employee import would email everyone at once).
+    // HR sends it explicitly with sendWelcomeEmail() when the employee should start.
     return this.prisma.onboardingChecklist.findUniqueOrThrow({
       where: { id: checklist.id },
       include: { tasks: { orderBy: { sortOrder: 'asc' } }, employee: true },
@@ -162,6 +159,51 @@ export class LifecycleService {
       },
       orderBy: { startedAt: 'desc' },
     });
+  }
+
+  /** Sends the real welcome email (portal link + how to sign in). Never contains a password. */
+  async sendWelcomeEmail(user: AuthUser, employeeId: string) {
+    if (!this.isHr(user)) throw new ForbiddenException();
+    const emp = await this.prisma.employee.findFirst({ where: { id: employeeId, companyId: user.companyId } });
+    if (!emp) throw new NotFoundException('Employee not found');
+    if (!emp.email || !isDeliverableEmail(emp.email)) throw new BadRequestException('This employee has no valid email address on file.');
+    if (!this.mail?.isConfigured()) throw new ServiceUnavailableException('Email (SMTP) is not configured.');
+    const checklist = await this.startOnboarding(user.companyId, employeeId, user.id);
+    const portal = (this.config?.get<string>('PUBLIC_APP_URL') ?? '').replace(/\/$/, '');
+    const name = [emp.firstName, emp.lastName].filter(Boolean).join(' ');
+    const lines = [
+      `Dear ${name},`,
+      '',
+      'Your EITF HRMS account is ready.',
+      portal ? `Portal: ${portal}` : '',
+      '',
+      'How to sign in:',
+      '  1. Open the portal and choose "Mobile OTP".',
+      `  2. Enter your registered mobile number${emp.mobile ? ` (ending ${emp.mobile.slice(-4)})` : ''}.`,
+      '  3. A one-time code is emailed to this address. Enter it to sign in.',
+      '',
+      'Never share the code with anyone, including HR. If your mobile number or email is wrong, contact HR.',
+    ].filter((l, i, arr) => !(l === '' && arr[i - 1] === ''));
+    const result = await this.mail.send({ to: emp.email, subject: 'Welcome to EITF HRMS', text: lines.join('\n'), category: 'welcome' });
+    const task = checklist.tasks.find((t) => t.code === 'WELCOME_EMAIL');
+    if (task) {
+      await this.prisma.onboardingTask.update({
+        where: { id: task.id },
+        data: result.ok
+          ? { status: OnboardingTaskStatus.DONE, completedAt: new Date(), completedBy: user.id, note: `Sent to ${maskEmail(emp.email)}` }
+          : { note: `Send failed (${result.error ?? 'error'}); try again` },
+      });
+    }
+    await this.audit.log({
+      companyId: user.companyId,
+      actorId: user.id,
+      action: AuditAction.UPDATE,
+      entityType: 'Employee',
+      entityId: emp.id,
+      metadata: { event: 'welcome_email', ok: result.ok },
+    });
+    if (!result.ok) throw new ServiceUnavailableException('The welcome email could not be sent. Please try again later.');
+    return { ok: true, sentTo: maskEmail(emp.email) };
   }
 
   async updateTask(

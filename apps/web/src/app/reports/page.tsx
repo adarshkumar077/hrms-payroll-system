@@ -131,11 +131,11 @@ export default function ReportsPage() {
     setError('');
     setMsg('');
     try {
-      const res = await api<{ ok: boolean; rows: number }>(
+      const res = await api<{ ok: boolean; rows: number; sentTo?: string }>(
         `/${active.base}/${active.kind}/export/email${qs}`,
         { method: 'POST', body: '{}' },
       );
-      setMsg(`Email stub queued (${res.rows} rows) — check notifications / dispatch log`);
+      setMsg(`Report emailed to ${res.sentTo ?? 'your address'} (${res.rows} rows)`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Email failed');
     }
@@ -187,7 +187,7 @@ export default function ReportsPage() {
         ← Dashboard
       </Link>
       <h1 className="font-display text-3xl text-brand-700 mt-2">Reports & Balance Sheets</h1>
-      <p className="text-sm text-ink/60 mb-6">Module 22 — query layer with CSV / print PDF / email stub</p>
+      <p className="text-sm text-ink/60 mb-6">Run reports, then download as CSV / Excel / PDF or email them to yourself</p>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-6 text-sm items-end">
@@ -328,7 +328,7 @@ export default function ReportsPage() {
               onClick={() => emailExport()}
               className="text-sm px-3 py-1.5 rounded border border-brand-300 hover:bg-brand-50 transition"
             >
-              Email stub
+              Email to me
             </button>
             {active.base === 'reports' && (
               <button

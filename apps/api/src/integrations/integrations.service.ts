@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from '@nestjs/common';
+import { MailService, isDeliverableEmail, maskEmail } from '../mail/mail.service';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'crypto';
 import { IntegrationProvider, Prisma, AuditAction } from '@prisma/client';
@@ -33,6 +34,7 @@ export class IntegrationsService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly audit: AuditService,
+    @Optional() private readonly mail?: MailService,
   ) {}
 
   async ensureDefaults(companyId: string) {
@@ -86,7 +88,7 @@ export class IntegrationsService {
     provider: string,
     eventType: string,
     payload: Prisma.InputJsonValue,
-    status = 'STUB_SENT',
+    status = 'LOGGED',
   ) {
     this.logger.log(`[${provider}] ${eventType} status=${status}`);
     return this.prisma.integrationEventLog.create({
@@ -102,39 +104,40 @@ export class IntegrationsService {
     });
   }
 
+  /**
+   * Sends a real email through the company SMTP account. To limit misuse (phishing from the company
+   * mailbox), the recipient must be the registered email of a user or employee of this company.
+   */
   async sendEmail(companyId: string, to: string, subject: string, body: string) {
-    const cfg = await this.prisma.integrationConfig.findUnique({
-      where: {
-        companyId_provider: { companyId, provider: IntegrationProvider.EMAIL },
-      },
+    if (!this.mail?.isConfigured()) {
+      throw new ServiceUnavailableException('Email (SMTP) is not configured. See docs/EMAIL_OTP_SETUP.md.');
+    }
+    const recipient = String(to ?? '').trim().toLowerCase();
+    if (!isDeliverableEmail(recipient)) throw new BadRequestException('Enter a valid email address.');
+    if (!subject?.trim() || !body?.trim()) throw new BadRequestException('Subject and message are required.');
+    const known =
+      (await this.prisma.employee.count({ where: { companyId, email: recipient } })) +
+      (await this.prisma.user.count({ where: { companyId, email: { equals: recipient, mode: 'insensitive' } } }));
+    if (!known) throw new BadRequestException('Emails can only be sent to addresses registered in this company.');
+    const result = await this.mail.send({
+      to: recipient,
+      subject: subject.trim().slice(0, 200),
+      text: body.slice(0, 20_000),
+      category: 'hr-message',
     });
-    const status = cfg?.isEnabled ? 'STUB_SENT' : 'DISABLED_STUB';
-    await this.logEvent(companyId, 'EMAIL', 'send', { to, subject, body: body.slice(0, 500) }, status);
-    // eslint-disable-next-line no-console
-    console.log(`[email] to=${to} subject=${subject}`);
-    return { ok: true, channel: 'EMAIL', status, stub: true };
+    await this.logEvent(companyId, 'EMAIL', 'send', { to: maskEmail(recipient), subject: subject.slice(0, 200) }, result.ok ? 'SENT' : 'FAILED');
+    if (!result.ok) throw new ServiceUnavailableException('The email could not be sent. Please try again later.');
+    return { ok: true, channel: 'EMAIL', status: 'SENT', to: maskEmail(recipient) };
   }
 
-  async sendSms(companyId: string, to: string, message: string) {
-    const cfg = await this.prisma.integrationConfig.findUnique({
-      where: { companyId_provider: { companyId, provider: IntegrationProvider.SMS } },
-    });
-    const status = cfg?.isEnabled ? 'STUB_SENT' : 'DISABLED_STUB';
-    await this.logEvent(companyId, 'SMS', 'send', { to, message }, status);
-    console.log(`[sms] to=${to} message=${message}`);
-    return { ok: true, channel: 'SMS', status, stub: true };
+  /** No SMS provider is integrated (MSG91 was removed; OTP and notices go by email). */
+  async sendSms(_companyId: string, _to: string, _message: string) {
+    throw new ServiceUnavailableException('SMS sending is not available: no SMS provider is integrated. Use email.');
   }
 
-  async sendWhatsApp(companyId: string, to: string, message: string) {
-    const cfg = await this.prisma.integrationConfig.findUnique({
-      where: {
-        companyId_provider: { companyId, provider: IntegrationProvider.WHATSAPP },
-      },
-    });
-    const status = cfg?.isEnabled ? 'STUB_SENT' : 'DISABLED_STUB';
-    await this.logEvent(companyId, 'WHATSAPP', 'send', { to, message }, status);
-    console.log(`[whatsapp] to=${to} message=${message}`);
-    return { ok: true, channel: 'WHATSAPP', status, stub: true };
+  /** No WhatsApp Business provider is integrated. */
+  async sendWhatsApp(_companyId: string, _to: string, _message: string) {
+    throw new ServiceUnavailableException('WhatsApp sending is not available: no WhatsApp provider is integrated. Use email.');
   }
 
   async syncGoogleCalendar(
@@ -163,15 +166,17 @@ export class IntegrationsService {
       'GOOGLE_CALENDAR',
       'sync_holidays',
       { actorId, year: y, events },
-      'STUB_SYNCED',
+      'NOT_CONNECTED',
     );
+    // Pushing events needs a Google OAuth connection, which is not implemented. Nothing is sent;
+    // the holiday list is returned so HR can import it into Google Calendar by hand.
     return {
-      ok: true,
-      stub: true,
+      ok: false,
       provider: 'GOOGLE_CALENDAR',
-      synced: events.length,
+      status: 'NOT_CONNECTED',
+      synced: 0,
       events,
-      note: 'Stub sync — connect Google OAuth credentials in integration config to push events',
+      note: 'Google Calendar is not connected; no events were pushed. The holiday list is shown for manual import.',
     };
   }
 
@@ -204,8 +209,8 @@ export class IntegrationsService {
       status: run.status,
       journal,
     };
-    await this.logEvent(companyId, 'ACCOUNTING', 'export_payroll', payload as Prisma.InputJsonValue, 'STUB_EXPORTED');
-    return { ok: true, stub: true, ...payload };
+    await this.logEvent(companyId, 'ACCOUNTING', 'export_payroll', payload as Prisma.InputJsonValue, 'EXPORTED');
+    return { ok: true, ...payload };
   }
 
   async listBiometricDevices(companyId: string) {
@@ -275,18 +280,29 @@ export class IntegrationsService {
   }
 
   async testConnection(user: AuthUser, provider: IntegrationProvider) {
-    const cfg = await this.prisma.integrationConfig.findUnique({
-      where: { companyId_provider: { companyId: user.companyId, provider } },
-    });
-    const ok = Boolean(cfg?.isEnabled);
-    const status = ok ? 'OK' : 'NOT_CONNECTED';
+    let ok: boolean;
+    let status: string;
+    let detail: string;
+    if (provider === IntegrationProvider.EMAIL) {
+      const v = this.mail ? await this.mail.verifyConnection() : { ok: false, error: 'smtp_not_configured' };
+      ok = v.ok;
+      status = v.ok ? 'OK' : 'FAILED';
+      detail = v.ok ? 'SMTP server accepted the connection and login.' : `SMTP check failed: ${v.error ?? 'unknown'}`;
+    } else {
+      const cfg = await this.prisma.integrationConfig.findUnique({
+        where: { companyId_provider: { companyId: user.companyId, provider } },
+      });
+      ok = false;
+      status = cfg?.isEnabled ? 'NO_LIVE_TEST' : 'NOT_CONNECTED';
+      detail = 'No live connection test exists for this provider; it is not integrated with an external service.';
+    }
     await this.logEvent(user.companyId, provider, 'test', { actorId: user.id }, status);
-    return { ok, provider, status, latencyMs: 12, stub: true };
+    return { ok, provider, status, detail };
   }
 
   async refresh(user: AuthUser, provider: IntegrationProvider) {
-    await this.logEvent(user.companyId, provider, 'refresh', { actorId: user.id }, 'REFRESHED');
-    return { ok: true, provider, syncedAt: new Date().toISOString(), stub: true };
+    await this.logEvent(user.companyId, provider, 'refresh', { actorId: user.id }, 'NOT_SUPPORTED');
+    return { ok: false, provider, status: 'NOT_SUPPORTED', detail: 'This provider has no external data to refresh.' };
   }
 
   async createApiKey(user: AuthUser, name: string) {

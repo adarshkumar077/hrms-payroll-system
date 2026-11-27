@@ -55,6 +55,13 @@ export class LifecycleController {
     return this.lifecycle.getOnboarding(user.companyId, employeeId);
   }
 
+  /** Sends the real welcome email (portal link + sign-in steps, no password). */
+  @Post('onboarding/:employeeId/welcome-email')
+  @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
+  welcomeEmail(@CurrentUser() user: AuthUser, @Param('employeeId') employeeId: string) {
+    return this.lifecycle.sendWelcomeEmail(user, employeeId);
+  }
+
   @Patch('onboarding/:id/task/:taskId')
   @Roles(RoleCode.SUPER_ADMIN, RoleCode.HR)
   updateTask(

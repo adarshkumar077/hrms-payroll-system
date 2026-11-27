@@ -59,11 +59,13 @@ export default function IntegrationsPage() {
 
   async function syncCalendar() {
     try {
-      const r = await api<{ synced: number }>('/integrations/google-calendar/sync', {
+      const r = await api<{ synced: number; status?: string; events?: unknown[]; note?: string }>('/integrations/google-calendar/sync', {
         method: 'POST',
         body: '{}',
       });
-      setMsg(`Calendar stub synced ${r.synced} holidays`);
+      setMsg(r.status === 'NOT_CONNECTED'
+        ? `Google Calendar is not connected: nothing was pushed. ${r.events?.length ?? 0} holiday(s) listed for manual import.`
+        : `Synced ${r.synced} holiday(s) to Google Calendar`);
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sync failed');
@@ -73,7 +75,7 @@ export default function IntegrationsPage() {
   async function exportAccounting() {
     try {
       const r = await api<{ journal: unknown[] }>('/integrations/accounting/export');
-      setMsg(`Accounting export stub: ${r.journal?.length ?? 0} journal lines`);
+      setMsg(`Accounting export ready: ${r.journal?.length ?? 0} journal line(s)`);
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Export failed');
@@ -126,8 +128,8 @@ export default function IntegrationsPage() {
               className="text-sm px-3 py-1.5 rounded border"
               onClick={async () => {
                 try {
-                  const r = await api<{ status: string }>(`/integrations/test/${c.provider}`, { method: 'POST', body: '{}' });
-                  setMsg(`${c.provider} test: ${r.status}`);
+                  const r = await api<{ status: string; detail?: string }>(`/integrations/test/${c.provider}`, { method: 'POST', body: '{}' });
+                  setMsg(`${c.provider} test: ${r.status}${r.detail ? ` — ${r.detail}` : ''}`);
                 } catch (e) {
                   setError(e instanceof Error ? e.message : 'Test failed');
                 }

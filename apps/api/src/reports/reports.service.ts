@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from '@nestjs/common';
+import { MailService, maskEmail } from '../mail/mail.service';
 import {
   LoanAdvanceStatus,
   LoanAdvanceType,
@@ -22,7 +23,10 @@ function avail(b: {
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly mail?: MailService,
+  ) {}
 
   async attendance(companyId: string, year?: number, month?: number) {
     const y = year ?? new Date().getFullYear();
@@ -617,29 +621,43 @@ export class ReportsService {
     rows: Record<string, unknown>[],
     recipientHint?: string,
   ) {
+    // Sent only to the requesting user's own registered email (never an arbitrary address).
+    if (!this.mail?.isConfigured()) {
+      throw new ServiceUnavailableException('Email (SMTP) is not configured. Download the report instead, or ask the administrator to set up email.');
+    }
+    if (!recipientHint) throw new BadRequestException('Your account has no email address to send the report to.');
     const csv = rowsToCsv(M.serializeMoney(rows));
-    await this.prisma.notification.create({
-      data: {
-        companyId,
-        title: `Report ready: ${title}`,
-        body: `Report "${title}" generated with ${rows.length} row(s). CSV attached in dispatch log (email stub).`,
-        category: 'report',
-        status: NotificationStatus.SENT,
-      },
+    const safeName = title.replace(/[^A-Za-z0-9 _-]+/g, '').trim().replace(/\s+/g, '_').slice(0, 80) || 'report';
+    const result = await this.mail.send({
+      to: recipientHint,
+      subject: `EITF HRMS report: ${title}`,
+      text: `Your requested report "${title}" (${rows.length} row(s)) is attached as CSV.\n\nThis email contains confidential HR data. Do not forward it outside the company.`,
+      category: 'report',
+      attachments: [{ filename: `${safeName}.csv`, content: '﻿' + csv, contentType: 'text/csv; charset=utf-8' }],
     });
+    // Delivery log holds counts and status only, never the report contents.
     await this.prisma.notificationDispatchLog.create({
       data: {
         companyId,
         channel: NotificationChannel.EMAIL,
-          recipient: recipientHint ?? 'report-recipient-not-configured',
+        recipient: maskEmail(recipientHint),
         title: `Report: ${title}`,
-        body: `Rows: ${rows.length}\n\n${csv.slice(0, 2000)}`,
-        status: 'STUB_SENT',
-        meta: { actorId, note: 'Email provider stub' },
+        body: `Rows: ${rows.length}`,
+        status: result.ok ? 'SENT' : 'FAILED',
+        meta: { actorId, attempts: result.attempts, error: result.error ?? null },
       },
     });
-    // eslint-disable-next-line no-console
-    console.log(`[report:email] ${title} rows=${rows.length}`);
-    return { ok: true, rows: rows.length, channel: 'EMAIL', stub: true };
+    if (!result.ok) throw new ServiceUnavailableException('The report email could not be sent. Please download it instead.');
+    await this.prisma.notification.create({
+      data: {
+        companyId,
+        userId: actorId,
+        title: `Report emailed: ${title}`,
+        body: `"${title}" (${rows.length} row(s)) was sent to ${maskEmail(recipientHint)}.`,
+        category: 'report',
+        status: NotificationStatus.SENT,
+      },
+    });
+    return { ok: true, rows: rows.length, channel: 'EMAIL', sentTo: maskEmail(recipientHint) };
   }
 }

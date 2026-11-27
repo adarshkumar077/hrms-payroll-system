@@ -70,11 +70,15 @@ type LoginInfo = {
   employeeActive: boolean;
 };
 
-function generateRandomPassword(length = 12) {
+/** Cryptographically random password (Web Crypto; rejection sampling avoids modulo bias). */
+function generateRandomPassword(length = 14) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  const limit = 256 - (256 % chars.length);
   let out = '';
-  for (let i = 0; i < length; i += 1) {
-    out += chars[Math.floor(Math.random() * chars.length)];
+  const buf = new Uint8Array(1);
+  while (out.length < length) {
+    crypto.getRandomValues(buf);
+    if (buf[0] < limit) out += chars[buf[0] % chars.length];
   }
   return out;
 }

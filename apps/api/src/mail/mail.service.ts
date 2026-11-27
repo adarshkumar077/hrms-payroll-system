@@ -9,6 +9,7 @@ export type MailMessage = {
   html?: string;
   /** Short label for logs/stats only (e.g. 'otp', 'alert', 'test'). */
   category: string;
+  attachments?: { filename: string; content: string | Buffer; contentType?: string }[];
 };
 
 export type MailResult = { ok: boolean; messageId?: string; error?: string; attempts: number };
@@ -150,6 +151,7 @@ export class MailService {
           subject: msg.subject,
           text: msg.text,
           html: msg.html,
+          attachments: msg.attachments,
         });
         this.lastSuccessAt = new Date();
         return { ok: true, messageId: typeof info?.messageId === 'string' ? info.messageId : undefined, attempts: attempt };
