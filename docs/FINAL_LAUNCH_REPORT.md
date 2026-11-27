@@ -17,10 +17,10 @@ production-identical stack on this PC (`eitf-p2test`, loopback only).
 | 2 | Automated tests pass on a production-identical stack | ✅ (`TESTING_RESULTS.md`) |
 | 3 | Load at 10/15/20/40/50 users within targets | ✅ 0 errors, p95 ≤ 840 ms |
 | 4 | Backup encrypted + restore verified | ✅ locally · ⛔ off-site (no bucket) |
-| 5 | Dedicated 24/7 server with UPS | ⛔ not provided (only this laptop) |
+| 5 | Dedicated 24/7 server with UPS, on a **supported OS** | ⛔ server is Windows 10 (end of support; upgrade or commercial ESU required, `WINDOWS_SERVER_DEPLOYMENT.md` §1); readiness check not yet run on it |
 | 6 | Real static public IP, no CGNAT | ⛔ unverified (router WAN IP needed) |
 | 7 | Domain + trusted TLS certificate | ⛔ no domain |
-| 8 | Real OTP email received in a test inbox | ⛔ no SMTP credentials |
+| 8 | Real OTP email received in a test inbox | ⛔ Google Workspace app password or SMTP relay not yet set up |
 | 9 | Monitoring alerts delivered | ⛔ needs SMTP + `ALERT_EMAILS` |
 | 10 | Payroll rules confirmed (R2) and mid-year TDS resolved (R1) | ⛔ business / CA decision |
 | 11 | Employee Excel validated in preview with 0 errors | ⏳ after gates 5–9 |
