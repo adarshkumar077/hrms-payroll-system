@@ -8,6 +8,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { MailModule } from './mail/mail.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
+import { EmployeeImportModule } from './employee-import/employee-import.module';
 import { CompanyModule } from './company/company.module';
 import { HealthModule } from './health/health.module';
 import { AuditModule } from './audit/audit.module';
@@ -44,6 +45,7 @@ import { Require2faGuard } from './security/require-2fa.guard';
     AuditModule,
     MailModule,
     MonitoringModule,
+    EmployeeImportModule,
     AuthModule,
     CompanyModule,
     EmployeesModule,
