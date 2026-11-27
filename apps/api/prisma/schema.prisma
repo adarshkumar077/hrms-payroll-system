@@ -404,6 +404,10 @@ model Employee {
   notifications     Notification[]
 
   @@unique([companyId, employeeCode])
+  /// Registered mobile and email are unique per company (OTP login looks employees up by mobile
+  /// and emails the code to this address). NULLs are allowed for legacy rows.
+  @@unique([companyId, mobile])
+  @@unique([companyId, email])
   @@index([companyId, isActive])
   @@index([companyId, status])
   @@index([companyId, department])

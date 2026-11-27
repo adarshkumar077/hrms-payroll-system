@@ -10,11 +10,15 @@ import {
   IsString,
   Matches,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { EmploymentStatus } from '@prisma/client';
+
+/** 10-digit Indian mobile number (starts with 6–9). Same rule as mobile OTP login. */
+export const MOBILE_PATTERN = /^[6-9][0-9]{9}$/;
 
 export class PersonalDto {
   @IsOptional() @IsString() nationality?: string;
@@ -97,11 +101,17 @@ export class CreateEmployeeDto {
   @IsOptional() @IsString() middleName?: string;
   @IsOptional() @IsString() lastName?: string;
   @IsOptional() @IsString() displayName?: string;
-  @IsOptional() @IsEmail() email?: string;
-  @IsOptional()
-  @IsString()
-  @Matches(/^[0-9]{10}$/, { message: 'Please enter a valid 10-digit mobile number.' })
-  mobile?: string;
+  /** Registered email (mandatory): employee mobile-OTP login codes are sent here. Unique per company. */
+  @ApiProperty({ example: 'asha.rao@company.com' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @IsEmail({}, { message: 'Please enter a valid email address.' })
+  email!: string;
+  /** Registered mobile (mandatory, 10-digit Indian mobile). Unique per company. */
+  @ApiProperty({ example: '9876543210' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.replace(/[\s-]/g, '') : value))
+  @IsString({ message: 'Please enter a valid 10-digit mobile number.' })
+  @Matches(MOBILE_PATTERN, { message: 'Please enter a valid 10-digit mobile number.' })
+  mobile!: string;
   @IsOptional() @IsEmail() workEmail?: string;
   @IsOptional() @IsEmail() personalEmail?: string;
   @IsOptional() @IsDateString() dateOfBirth?: string;
@@ -159,10 +169,15 @@ export class UpdateEmployeeDto {
   @IsOptional() @IsString() middleName?: string;
   @IsOptional() @IsString() lastName?: string;
   @IsOptional() @IsString() displayName?: string;
-  @IsOptional() @IsEmail() email?: string;
-  @IsOptional()
-  @IsString()
-  @Matches(/^[0-9]{10}$/, { message: 'Please enter a valid 10-digit mobile number.' })
+  /** May be changed (HR/Admin only, audited) but never cleared: null/'' are rejected. */
+  @ValidateIf((o) => o.email !== undefined)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @IsEmail({}, { message: 'Please enter a valid email address.' })
+  email?: string;
+  @ValidateIf((o) => o.mobile !== undefined)
+  @Transform(({ value }) => (typeof value === 'string' ? value.replace(/[\s-]/g, '') : value))
+  @IsString({ message: 'Please enter a valid 10-digit mobile number.' })
+  @Matches(MOBILE_PATTERN, { message: 'Please enter a valid 10-digit mobile number.' })
   mobile?: string;
   @IsOptional() @IsEmail() workEmail?: string;
   @IsOptional() @IsEmail() personalEmail?: string;

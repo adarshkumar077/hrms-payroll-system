@@ -207,7 +207,7 @@ export default function EmployeesPage() {
           employeeCode: form.employeeCode.trim(),
           firstName: form.firstName,
           lastName: form.lastName || undefined,
-          email: form.email || undefined,
+          email: form.email.trim().toLowerCase(),
           mobile: form.mobile,
           gender: form.gender,
           department: form.department || undefined,
@@ -484,7 +484,7 @@ export default function EmployeesPage() {
               [
                 ['firstName', 'First name', true],
                 ['lastName', 'Last name', false],
-                ['email', 'Email', false],
+                ['email', 'Email (OTP login codes are sent here)', true],
                 ['mobile', 'Mobile', true],
                 ['department', 'Department', false],
                 ['designation', 'Designation', false],
@@ -505,7 +505,8 @@ export default function EmployeesPage() {
                   required={required}
                   minLength={key === 'username' ? 5 : undefined}
                   maxLength={key === 'mobile' ? 10 : undefined}
-                  inputMode={key === 'mobile' ? 'numeric' : undefined}
+                  inputMode={key === 'mobile' ? 'numeric' : key === 'email' ? 'email' : undefined}
+                  type={key === 'email' ? 'email' : 'text'}
                 />
                 {fieldErrors[key] && <p className="mt-1 text-xs text-red-600">{fieldErrors[key]}</p>}
               </label>

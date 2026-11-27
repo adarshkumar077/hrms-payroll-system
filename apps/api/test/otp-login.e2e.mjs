@@ -3,8 +3,9 @@
  *
  * Runs the REAL compiled API (dist/main.js) against a SEPARATE throw-away database
  * (eitf_hrms_test on the embedded Postgres) — the development database is never touched.
- * The only stand-in is a local HTTP mock of MSG91's /api/v5/flow endpoint, so the real
- * Msg91OtpProvider is exercised end to end and the test can read the OTP the "SMS" carried.
+ * The only stand-in is a local SMTP receiver (a minimal mail server inside this test), so the
+ * real MailService / nodemailer path is exercised end to end and the test reads the OTP from the
+ * email that actually arrived. Real-provider delivery is verified separately (docs/EMAIL_OTP_SETUP.md).
  *
  * Usage (from apps/api, embedded Postgres running, after `npm run build`):
  *   node --test test/otp-login.e2e.mjs
@@ -12,7 +13,7 @@
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execSync } from 'node:child_process';
-import http from 'node:http';
+import net from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,15 +30,16 @@ const TEST_DB_URL = `postgresql://${PG.user}:${PG.password}@${PG.host}:${PG.port
 const API_PORT = 3101;
 const MOCK_PORT = 39091;
 const BASE = `http://127.0.0.1:${API_PORT}/api/v1`;
-const AUTH_KEY = `test-msg91-key-${randomBytes(6).toString('hex')}`;
 const PASSWORD = 'Str0ng#TestPass1';
 
 let prisma;
 let api;
 let apiLogs = '';
 let mock;
-const smsInbox = new Map(); // national mobile -> [{ otp, at }]
+const smsInbox = new Map(); // national mobile -> [{ otp, at }] (filled from received emails)
 const sentCodes = [];
+const emailToMobile = new Map(); // registered employee email -> national mobile
+const receivedEmails = []; // { to, subject }
 const ids = {};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -79,7 +81,7 @@ async function requestAndReadOtp(mobile, ip = freshIp()) {
   const r = await call('POST', '/auth/otp/request', { body: { mobile }, ip });
   assert.equal(r.status, 201, `request failed: ${r.text}`);
   const otp = await waitForSms(mobile, before);
-  assert.ok(otp, 'SMS was not delivered to the mock provider');
+  assert.ok(otp, 'OTP email was not delivered to the test mail server');
   return otp;
 }
 const wrongCode = (otp) => String((Number(otp) + 1) % 1_000_000).padStart(6, '0');
@@ -112,8 +114,11 @@ async function seedFixtures() {
   const roleIds = { EMPLOYEE: await role('EMPLOYEE'), HR: await role('HR'), SUPER_ADMIN: await role('SUPER_ADMIN') };
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
-  const employee = (code, mobile, isActive = true) =>
-    prisma.employee.create({ data: { companyId, employeeCode: code, firstName: code, mobile, isActive } });
+  // Every test employee has a registered email (needed for email OTP) unless email === null.
+  const employee = (code, mobile, isActive = true, email = `${code.toLowerCase()}@emp.test`) => {
+    if (email && mobile) emailToMobile.set(email, mobile.replace(/\D/g, '').slice(-10));
+    return prisma.employee.create({ data: { companyId, employeeCode: code, firstName: code, mobile, email, isActive } });
+  };
   const user = (loginId, { employeeId = null, mobile = null, roles = ['EMPLOYEE'], status = 'ACTIVE' } = {}) =>
     prisma.user.create({
       data: {
@@ -156,8 +161,11 @@ async function seedFixtures() {
   const L = await employee('EMPL', '+91 98765-00013'); // saved in a non-standard format (e.g. import)
   await user('EMPL', { employeeId: L.id, mobile: null });
   const M = await prisma.employee.create({
-    data: { companyId, employeeCode: 'EMPM', firstName: 'EMPM', mobile: '9876500014', isActive: true, status: 'RESIGNED' },
+    data: { companyId, employeeCode: 'EMPM', firstName: 'EMPM', mobile: '9876500014', email: 'empm@emp.test', isActive: true, status: 'RESIGNED' },
   });
+  // Active employee with a login but NO registered email: must contact HR, never gets an OTP.
+  const Q = await employee('EMPQ', '9876500017', true, null);
+  await user('EMPQ', { employeeId: Q.id, mobile: '9876500017' });
   await user('EMPM', { employeeId: M.id, mobile: '9876500014' });
   const N = await employee('EMPN', '9876500015'); // timed lockout already expired
   const userN = await user('EMPN', { employeeId: N.id, mobile: '9876500015', status: 'LOCKED' });
@@ -225,30 +233,60 @@ async function seedFixtures() {
   ).id;
 }
 
-function startMockMsg91() {
+/** Minimal SMTP receiver: EHLO/MAIL/RCPT/DATA/QUIT, records recipient + subject of each message. */
+function startMockSmtp() {
   return new Promise((resolve) => {
-    mock = http.createServer((req, res) => {
-      let raw = '';
-      req.on('data', (c) => (raw += c));
-      req.on('end', () => {
-        const ok = req.url === '/api/v5/flow' && req.headers.authkey === AUTH_KEY;
-        if (ok) {
-          const body = JSON.parse(raw);
-          for (const r of body.recipients) {
-            const national = r.mobiles.replace(/^91/, '');
-            const list = smsInbox.get(national) ?? [];
-            list.push({ otp: r.otp, at: Date.now() });
-            smsInbox.set(national, list);
-            sentCodes.push(r.otp);
+    mock = net.createServer((sock) => {
+      let buf = '';
+      let inData = false;
+      let rcpt = [];
+      let data = '';
+      sock.write('220 test-smtp ready\r\n');
+      sock.on('data', (chunk) => {
+        buf += chunk.toString('utf8');
+        let idx;
+        while ((idx = buf.indexOf('\r\n')) >= 0) {
+          const line = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          if (inData) {
+            if (line === '.') {
+              inData = false;
+              const subject = (data.match(/^Subject: (.*)$/m) ?? [])[1] ?? '';
+              const code = (subject.match(/(\d{6})\s*$/) ?? [])[1];
+              for (const to of rcpt) {
+                receivedEmails.push({ to, subject });
+                const mobile = emailToMobile.get(to.toLowerCase());
+                if (code) {
+                  sentCodes.push(code);
+                  const key = mobile ?? `email:${to}`;
+                  const list = smsInbox.get(key) ?? [];
+                  list.push({ otp: code, at: Date.now() });
+                  smsInbox.set(key, list);
+                }
+              }
+              rcpt = [];
+              data = '';
+              sock.write('250 OK queued\r\n');
+            } else {
+              data += line + '\n';
+            }
+            continue;
           }
+          const cmd = line.slice(0, 4).toUpperCase();
+          if (cmd === 'EHLO' || cmd === 'HELO') sock.write('250-test-smtp\r\n250 8BITMIME\r\n');
+          else if (cmd === 'MAIL') sock.write('250 OK\r\n');
+          else if (cmd === 'RCPT') { rcpt.push((line.match(/<([^>]+)>/) ?? [])[1] ?? ''); sock.write('250 OK\r\n'); }
+          else if (cmd === 'DATA') { inData = true; sock.write('354 End data with <CR><LF>.<CR><LF>\r\n'); }
+          else if (cmd === 'QUIT') { sock.write('221 Bye\r\n'); sock.end(); }
+          else sock.write('250 OK\r\n');
         }
-        res.writeHead(ok ? 200 : 401, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(ok ? { type: 'success', message: `mock-${Date.now()}` } : { type: 'error' }));
       });
+      sock.on('error', () => undefined);
     });
     mock.listen(MOCK_PORT, '127.0.0.1', resolve);
   });
 }
+const totalEmails = () => receivedEmails.length;
 
 async function startApi() {
   api = spawn(process.execPath, ['dist/main.js'], {
@@ -260,10 +298,13 @@ async function startApi() {
       API_PORT: String(API_PORT),
       COOKIE_SECURE: 'false',
       REDIS_URL: '',
-      SMS_PROVIDER: 'msg91',
-      MSG91_AUTH_KEY: AUTH_KEY,
-      MSG91_OTP_TEMPLATE_ID: 'test-template',
-      MSG91_BASE_URL: `http://127.0.0.1:${MOCK_PORT}`,
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: String(MOCK_PORT),
+      SMTP_SECURE: 'false',
+      SMTP_REQUIRE_TLS: 'false', // the local test receiver has no TLS; production requires it
+      SMTP_FROM_EMAIL: 'hrms-otp@test.local',
+      SMTP_FROM_NAME: 'EITF HRMS (test)',
+      SUPPORT_CONTACT: 'hr@test.local',
       OTP_HASH_SECRET: randomBytes(32).toString('hex'),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -286,7 +327,7 @@ async function startApi() {
 before(async () => {
   await recreateTestDb();
   await seedFixtures();
-  await startMockMsg91();
+  await startMockSmtp();
   await startApi();
 });
 
@@ -297,21 +338,25 @@ after(async () => {
 });
 
 // ── OTP tests ────────────────────────────────────────────────────────────────
-describe('OTP generation and SMS delivery', () => {
+describe('OTP generation and email delivery', () => {
   test('status reports OTP login enabled with the fixed policy', async () => {
     const r = await call('GET', '/auth/otp/status');
     assert.equal(r.status, 200);
     assert.deepEqual(r.body, { enabled: true, codeLength: 6, expiresInSeconds: 300, resendAfterSeconds: 30 });
   });
 
-  test('request sends a 6-digit OTP by SMS and never returns it', async () => {
+  test('request emails a 6-digit OTP to the registered address and never returns it', async () => {
     const before = smsCount('9876500001');
     const r = await call('POST', '/auth/otp/request', { body: { mobile: '+91 98765 00001' } });
     assert.equal(r.status, 201);
     assert.deepEqual(Object.keys(r.body).sort(), ['expiresInSeconds', 'message', 'resendAfterSeconds']);
+    assert.match(r.body.message, /email address registered with HR/);
     const otp = await waitForSms('9876500001', before);
     assert.match(otp, /^\d{6}$/);
     assert.ok(!r.text.includes(otp), 'OTP leaked in the response');
+    const mail = receivedEmails.at(-1);
+    assert.equal(mail.to, 'empa@emp.test', 'sent to the employee record email');
+    assert.match(mail.subject, /EITF HRMS login code/);
   });
 
   test('OTP is stored only as a keyed hash bound to the challenge', async () => {
@@ -464,8 +509,9 @@ describe('resend cooldown and rate limits', () => {
   });
 });
 
-describe('accounts that must not receive an OTP (same public response, no SMS, no account created)', () => {
+describe('accounts that must not receive an OTP (same public response, no email sent, no account created)', () => {
   const cases = [
+    ['active employee with no registered email (must contact HR)', '9876500017'],
     ['unregistered number', '9123456789'],
     ['inactive employee record', '9876500003'],
     ['employee without a login account', '9876500004'],
@@ -478,12 +524,12 @@ describe('accounts that must not receive an OTP (same public response, no SMS, n
   for (const [name, mobile] of cases) {
     test(name, async () => {
       const usersBefore = await prisma.user.count();
-      const before = smsCount(mobile);
+      const before = totalEmails();
       const r = await call('POST', '/auth/otp/request', { body: { mobile } });
       assert.equal(r.status, 201);
-      assert.equal(r.body.message, 'If this mobile number is registered for employee login, an OTP has been sent.');
+      assert.equal(r.body.message, 'If this mobile number is registered for employee login, an OTP has been sent to the email address registered with HR.');
       await new Promise((res) => setTimeout(res, 400));
-      assert.equal(smsCount(mobile), before, 'an SMS must not be sent');
+      assert.equal(totalEmails(), before, 'no email may be sent');
       assert.equal(await prisma.user.count(), usersBefore, 'no account may be created');
       const v = await call('POST', '/auth/otp/verify', { body: { mobile, code: '123456' } });
       assert.equal(v.status, 401);
@@ -491,18 +537,18 @@ describe('accounts that must not receive an OTP (same public response, no SMS, n
   }
 
   test('employee marked RESIGNED (isActive still true) gets no OTP', async () => {
-    const before = smsCount('9876500014');
+    const before = totalEmails();
     const r = await call('POST', '/auth/otp/request', { body: { mobile: '9876500014' } });
     assert.equal(r.status, 201);
     await new Promise((res) => setTimeout(res, 400));
-    assert.equal(smsCount('9876500014'), before);
+    assert.equal(totalEmails(), before);
   });
 
   test('old number left on the login account stops working once HR changes the employee mobile', async () => {
-    const before = smsCount('9876500012');
+    const before = totalEmails();
     await call('POST', '/auth/otp/request', { body: { mobile: '9876500012' } });
     await new Promise((res) => setTimeout(res, 400));
-    assert.equal(smsCount('9876500012'), before, 'old number must not receive an OTP');
+    assert.equal(totalEmails(), before, 'old number must not trigger an OTP email');
     const otp = await requestAndReadOtp('9876500011');
     const r = await call('POST', '/auth/otp/verify', { body: { mobile: '9876500011', code: otp } });
     assert.equal(r.status, 201);
@@ -515,10 +561,10 @@ describe('accounts that must not receive an OTP (same public response, no SMS, n
   });
 
   test('account locked just now gets no OTP', async () => {
-    const before = smsCount('9876500016');
+    const before = totalEmails();
     await call('POST', '/auth/otp/request', { body: { mobile: '9876500016' } });
     await new Promise((res) => setTimeout(res, 400));
-    assert.equal(smsCount('9876500016'), before);
+    assert.equal(totalEmails(), before);
   });
 
   test('account whose timed lockout has expired can log in and is unlocked (same as password login)', async () => {
@@ -667,12 +713,16 @@ describe('employee data isolation (logged in via OTP as employee A)', () => {
 });
 
 // ── Secrets hygiene ─────────────────────────────────────────────────────────
-describe('no OTP or SMS credential in logs', () => {
-  test('API logs contain none of the delivered OTPs and not the MSG91 key', () => {
+describe('no OTP or personal data in logs', () => {
+  test('API logs contain none of the delivered OTPs', () => {
     assert.ok(sentCodes.length > 5, 'expected several OTPs to have been sent');
     for (const code of sentCodes) {
       assert.ok(!apiLogs.includes(code), `OTP ${code.slice(0, 2)}**** found in API logs`);
     }
-    assert.ok(!apiLogs.includes(AUTH_KEY), 'MSG91 auth key found in API logs');
+  });
+  test('API logs contain no full employee email address (only masked)', () => {
+    for (const email of emailToMobile.keys()) {
+      assert.ok(!apiLogs.includes(email), `full email ${email.slice(0, 2)}*** found in API logs`);
+    }
   });
 });

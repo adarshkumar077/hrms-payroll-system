@@ -1,4 +1,5 @@
-import { ForbiddenException, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { MailService, isDeliverableEmail, maskEmail } from '../mail/mail.service';
 import {
   NotificationChannel,
   NotificationStatus,
@@ -10,7 +11,10 @@ import { CreateAnnouncementDto, SendNotificationDto } from './dto/aggregation.dt
 
 @Injectable()
 export class NotificationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly mail?: MailService,
+  ) {}
 
   private isHr(user: AuthUser) {
     return user.roles.some((r) => (['SUPER_ADMIN', 'HR'] as string[]).includes(r));
@@ -55,7 +59,8 @@ export class NotificationsService {
   }
 
   /**
-   * Fan-out notification to dashboard (+ console stubs for email/sms/whatsapp/push).
+   * Fan-out notification: in-app always; email via SMTP to the targeted employee; SMS / WhatsApp /
+   * push are recorded as not configured (no provider).
    */
   async send(companyId: string, dto: SendNotificationDto, actorId?: string) {
     await this.ensureDefaultTemplates(companyId);
@@ -75,34 +80,61 @@ export class NotificationsService {
       },
     });
 
-    const recipient =
-      dto.employeeId ??
-      (await this.prisma.employee
-        .findFirst({ where: { companyId, isActive: true } })
-        .then((e) => e?.email ?? e?.mobile ?? 'company'));
+    // Email goes only to the targeted employee's own registered address. Company-wide
+    // notifications (no employeeId) stay in-app; they are never emailed to an arbitrary person.
+    const employee = dto.employeeId
+      ? await this.prisma.employee.findFirst({
+          where: { companyId, id: dto.employeeId },
+          select: { id: true, email: true },
+        })
+      : null;
 
     for (const channel of channels) {
+      let status: string;
+      let note: string;
+      let recipient: string;
+      if (channel === NotificationChannel.DASHBOARD) {
+        status = 'DELIVERED';
+        note = 'In-app notification';
+        recipient = dto.employeeId ?? 'company';
+      } else if (channel === NotificationChannel.EMAIL) {
+        recipient = employee?.email ? maskEmail(employee.email) : dto.employeeId ?? 'company';
+        if (!employee) {
+          status = 'SKIPPED';
+          note = 'Company-wide notification: shown in-app only';
+        } else if (!this.mail?.isConfigured()) {
+          status = 'NOT_CONFIGURED';
+          note = 'Email (SMTP) is not configured';
+        } else if (!isDeliverableEmail(employee.email)) {
+          status = 'SKIPPED';
+          note = 'Employee has no valid email on file';
+        } else {
+          const r = await this.mail.send({
+            to: employee.email,
+            subject: dto.title,
+            text: `${dto.body}\n\n— EITF HRMS`,
+            category: 'notification',
+          });
+          status = r.ok ? 'SENT' : 'FAILED';
+          note = r.ok ? 'Email sent' : `Email failed: ${r.error}`;
+        }
+      } else {
+        // SMS / WhatsApp / push have no provider: record it, never print content or recipients.
+        status = 'NOT_CONFIGURED';
+        note = `${channel} provider not configured`;
+        recipient = dto.employeeId ?? 'company';
+      }
       await this.prisma.notificationDispatchLog.create({
         data: {
           companyId,
           channel,
-          recipient: String(recipient),
+          recipient,
           title: dto.title,
           body: dto.body,
-          status: channel === NotificationChannel.DASHBOARD ? 'DELIVERED' : 'STUB_SENT',
-          meta: {
-            actorId,
-            note:
-              channel === NotificationChannel.DASHBOARD
-                ? 'In-app notification'
-                : `${channel} provider stub (console)`,
-          } as Prisma.InputJsonValue,
+          status,
+          meta: { actorId, note } as Prisma.InputJsonValue,
         },
       });
-      if (channel !== NotificationChannel.DASHBOARD) {
-        // eslint-disable-next-line no-console
-        console.log(`[notify:${channel}] to=${recipient} | ${dto.title} — ${dto.body}`);
-      }
     }
 
     return notification;

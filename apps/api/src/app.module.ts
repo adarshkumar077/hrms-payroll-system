@@ -6,6 +6,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { MoneySerializeInterceptor } from './common/money-serialize.interceptor';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
+import { MailModule } from './mail/mail.module';
 import { CompanyModule } from './company/company.module';
 import { HealthModule } from './health/health.module';
 import { AuditModule } from './audit/audit.module';
@@ -40,6 +41,7 @@ import { Require2faGuard } from './security/require-2fa.guard';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     PrismaModule,
     AuditModule,
+    MailModule,
     AuthModule,
     CompanyModule,
     EmployeesModule,

@@ -18,7 +18,7 @@ export default function LoginPage() {
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [otpInfo, setOtpInfo] = useState('');
-  // null = unknown (status not loaded yet); false = no SMS provider configured on the server.
+  // null = unknown (status not loaded yet); false = email (SMTP) is not configured on the server.
   const [otpEnabled, setOtpEnabled] = useState<boolean | null>(null);
   const [otpConfigError, setOtpConfigError] = useState('');
   const [resendIn, setResendIn] = useState(0);
@@ -192,7 +192,7 @@ export default function LoginPage() {
       const wait = err instanceof Error ? err.message.match(/wait (\d+) seconds/i) : null;
       if (wait) setResendIn(Number(wait[1]));
       if (err instanceof ApiError && err.status === 503) {
-        // Server says SMS is not configured: show the configuration error, never "OTP sent".
+        // Server says email is not configured: show the configuration error, never "OTP sent".
         setOtpEnabled(false);
         setOtpConfigError(err.message);
         return;
@@ -454,10 +454,13 @@ export default function LoginPage() {
 
           {mode === 'otp' && (
             <form onSubmit={otpSent ? onVerifyOtp : onRequestOtp} className="card p-4 sm:p-6 space-y-4">
-              <p className="text-xs text-ink-500">For employee accounts. Admin and HR users sign in with User ID and password.</p>
+              <p className="text-xs text-ink-500">
+                For employees: enter your registered mobile number and we will email a one-time code to the email
+                address registered with HR. Admin and HR users sign in with User ID and password.
+              </p>
               {otpEnabled === false && otpConfigError && (
                 <div role="alert" className="text-sm text-danger bg-danger-light/50 rounded-xl px-3 py-2">
-                  <p className="font-medium">SMS provider not configured</p>
+                  <p className="font-medium">Email delivery not configured</p>
                   <p className="mt-0.5">{otpConfigError}</p>
                 </div>
               )}
@@ -480,9 +483,12 @@ export default function LoginPage() {
                 <>
                   {otpInfo && !otpExpired && (
                     <div role="status" className="text-sm text-emerald-800 bg-emerald-50 rounded-xl px-3 py-2">
-                      <p className="font-medium">OTP sent{maskedMobile ? ` to ${maskedMobile}` : ''}</p>
+                      <p className="font-medium">OTP sent by email{maskedMobile ? ` (mobile ${maskedMobile})` : ''}</p>
                       <p className="mt-0.5">
                         {otpInfo} It expires in <span className="font-mono">{mmss(expiresIn)}</span>.
+                      </p>
+                      <p className="mt-1 text-xs text-emerald-900/80">
+                        Not in your inbox? Check the spam folder. If your email is missing or wrong, contact HR.
                       </p>
                     </div>
                   )}

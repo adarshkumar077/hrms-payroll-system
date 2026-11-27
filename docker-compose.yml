@@ -86,11 +86,17 @@ services:
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_LOGIN_ID: ${BOOTSTRAP_ADMIN_LOGIN_ID:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
-      # Mobile OTP login (off unless SMS_PROVIDER=msg91 and its credentials are set)
-      SMS_PROVIDER: ${SMS_PROVIDER:-}
-      MSG91_AUTH_KEY: ${MSG91_AUTH_KEY:-}
-      MSG91_OTP_TEMPLATE_ID: ${MSG91_OTP_TEMPLATE_ID:-}
-      MSG91_OTP_VAR: ${MSG91_OTP_VAR:-otp}
+      # Email (SMTP): mobile OTP login emails, notifications and admin alerts
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-EITF HRMS}
+      SUPPORT_CONTACT: ${SUPPORT_CONTACT:-}
+      MAIL_MAX_PER_MINUTE: ${MAIL_MAX_PER_MINUTE:-60}
+      ALERT_EMAILS: ${ALERT_EMAILS:-}
       OTP_HASH_SECRET: ${OTP_HASH_SECRET:-}
       # AI assistant (optional; empty key = built-in rules engine, nothing sent to OpenAI)
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

@@ -13,8 +13,12 @@ import { AuditAction, Prisma, UserStatus } from '@prisma/client';
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
-import { SmsService } from '../../sms/sms.service';
+import { MailService, isDeliverableEmail, maskEmail } from '../../mail/mail.service';
+import { otpEmail } from '../../mail/otp-email.template';
 import { maskMobile, normalizeIndianMobile } from './mobile.util';
+
+/** Who receives a login OTP: the eligible account and the employee's registered email. */
+export type OtpRecipient = { userId: string; email: string; name: string | null };
 
 /** Policy (fixed by the security requirements, not configurable downwards by env). */
 export const OTP_LENGTH = 6;
@@ -26,7 +30,7 @@ export const OTP_MAX_PER_MOBILE_PER_DAY = 10;
 export const OTP_MAX_PER_IP_PER_HOUR = 30;
 
 export const OTP_SENT_MESSAGE =
-  'If this mobile number is registered for employee login, an OTP has been sent.';
+  'If this mobile number is registered for employee login, an OTP has been sent to the email address registered with HR.';
 export const OTP_INVALID_MESSAGE = 'Invalid or expired OTP.';
 export const OTP_EXPIRED_MESSAGE = 'This OTP has expired. Please request a new OTP.';
 export const OTP_NONE_MESSAGE = 'No active OTP for this number. Please request a new OTP.';
@@ -36,8 +40,8 @@ export const otpIncorrectMessage = (remaining: number) =>
     ? `Incorrect OTP. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`
     : 'Incorrect OTP. Please request a new OTP.';
 export const OTP_UNAVAILABLE_MESSAGE =
-  'Mobile OTP login is not configured on this server: no SMS provider is set up. ' +
-  'Please sign in with your password, or ask your administrator to configure SMS (see docs/SMS-OTP-LOGIN.md).';
+  'Mobile OTP login is not configured on this server: email (SMTP) delivery is not set up. ' +
+  'Please sign in with your password, or ask your administrator to configure email (see docs/EMAIL_OTP_SETUP.md).';
 
 const PRIVILEGED_ROLES = ['SUPER_ADMIN', 'ADMIN', 'HR'];
 
@@ -111,12 +115,12 @@ export class OtpService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly sms: SmsService,
+    private readonly mail: MailService,
     private readonly audit: AuditService,
   ) {}
 
   isEnabled(): boolean {
-    return this.sms.isOtpDeliveryEnabled() && this.hashKey() !== null;
+    return this.mail.isConfigured() && this.hashKey() !== null;
   }
 
   status() {
@@ -193,6 +197,17 @@ export class OtpService {
    * - Never creates or changes accounts.
    */
   async findEligibleUserId(companyId: string, mobile: string): Promise<string | null> {
+    return (await this.findEligibleRecipient(companyId, mobile))?.userId ?? null;
+  }
+
+  /** Eligible account + the employee's registered email (HR-managed `employees.email`). */
+  async findEligibleRecipient(companyId: string, mobile: string): Promise<OtpRecipient | null> {
+    const accountId = await this.matchAccountId(companyId, mobile);
+    return accountId ? this.resolveRecipient(companyId, accountId, mobile) : null;
+  }
+
+  /** The single login account matching a mobile number (no eligibility checks yet). */
+  private async matchAccountId(companyId: string, mobile: string): Promise<string | null> {
     const [empRows, userRows] = await Promise.all([
       this.prisma.$queryRaw<{ id: string }[]>`
         SELECT id FROM employees
@@ -234,19 +249,30 @@ export class OtpService {
       );
       return null;
     }
+    return ids[0];
+  }
+
+  private async resolveRecipient(companyId: string, userId: string, mobile: string): Promise<OtpRecipient | null> {
     const user = await this.prisma.user.findFirst({
-      where: { id: ids[0], companyId },
+      where: { id: userId, companyId },
       select: {
         id: true,
         status: true,
         lockedAt: true,
         employeeId: true,
         userRoles: { select: { role: { select: { code: true } } } },
-        employee: { select: { isActive: true, status: true } },
+        employee: { select: { isActive: true, status: true, email: true, firstName: true, displayName: true } },
       },
     });
     const lockout = user?.status === UserStatus.LOCKED ? await this.lockoutMinutes(companyId) : undefined;
-    return isOtpEligible(user, lockout) ? user!.id : null;
+    if (!user || !isOtpEligible(user, lockout)) return null;
+    const email = user.employee?.email?.trim().toLowerCase() ?? '';
+    if (!isDeliverableEmail(email)) {
+      // Same public response as any other number; HR must add a valid email to the employee record.
+      this.logger.warn(`OTP login refused: employee with mobile ${maskMobile(mobile)} has no valid registered email. HR should update it.`);
+      return null;
+    }
+    return { userId: user.id, email, name: user.employee?.displayName || user.employee?.firstName || null };
   }
 
   /** Daily purge of old OTP rows (mobile numbers and IPs are personal data). */
@@ -275,7 +301,8 @@ export class OtpService {
     }
 
     // Resolved for every number, registered or not, so timing and responses stay uniform.
-    const userId = await this.findEligibleUserId(companyId, mobile);
+    const recipient = await this.findEligibleRecipient(companyId, mobile);
+    const userId = recipient?.userId ?? null;
     const id = randomUUID();
     const code = OtpService.generateCode();
     const codeHash = this.hashCode(id, code);
@@ -330,8 +357,8 @@ export class OtpService {
     });
 
     // Delivery is not awaited: the response time must not reveal whether the number is registered.
-    if (userId) {
-      void this.deliver(id, mobile, code).catch((err) =>
+    if (recipient) {
+      void this.deliver(id, recipient, code).catch((err) =>
         this.logger.error(`OTP delivery bookkeeping failed for ${maskMobile(mobile)}: ${String(err)}`),
       );
     }
@@ -343,18 +370,25 @@ export class OtpService {
     };
   }
 
-  /** Exposed for tests; sends the SMS and records the outcome (never the code). */
-  async deliver(challengeId: string, mobile: string, code: string) {
-    const result = await this.sms.sendOtp(mobile, code);
+  /** Exposed for tests; emails the OTP and records the outcome (never the code). */
+  async deliver(challengeId: string, recipient: OtpRecipient, code: string) {
+    const tpl = otpEmail({
+      code,
+      expiresInMinutes: Math.round(OTP_TTL_SECONDS / 60),
+      employeeName: recipient.name,
+      supportContact: this.config.get<string>('SUPPORT_CONTACT') ?? null,
+    });
+    const result = await this.mail.send({ to: recipient.email, subject: tpl.subject, text: tpl.text, html: tpl.html, category: 'otp' });
+    // Column keeps its historical name (sms_status); it records the email delivery outcome.
     await this.prisma.otpChallenge.update({
       where: { id: challengeId },
       data: {
         smsStatus: result.ok ? 'sent' : 'failed',
-        providerMessageId: result.providerMessageId ?? null,
+        providerMessageId: result.messageId?.slice(0, 190) ?? null,
       },
     });
     if (!result.ok) {
-      this.logger.error(`OTP SMS delivery failed for ${maskMobile(mobile)} via ${this.sms.providerName}: ${result.error}`);
+      this.logger.error(`OTP email delivery failed for ${maskEmail(recipient.email)}: ${result.error}`);
     }
     return result;
   }

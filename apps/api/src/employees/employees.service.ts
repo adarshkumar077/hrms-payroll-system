@@ -231,6 +231,37 @@ export class EmployeesService {
     if (!available) throw new BadRequestException(EMPLOYEE_CODE_EXISTS_MSG);
   }
 
+  /**
+   * Registered mobile and email must each belong to one employee only (mobile OTP login finds the
+   * employee by mobile and emails the code to this address). Clear message for HR instead of a
+   * database constraint error.
+   */
+  private async assertContactsAvailable(
+    companyId: string,
+    contacts: { mobile?: string | null; email?: string | null },
+    excludeId?: string,
+  ) {
+    const notSelf = excludeId ? { NOT: { id: excludeId } } : {};
+    if (contacts.mobile) {
+      const clash = await this.prisma.employee.findFirst({
+        where: { companyId, mobile: contacts.mobile, ...notSelf },
+        select: { employeeCode: true },
+      });
+      if (clash) {
+        throw new BadRequestException(`This mobile number is already registered to employee ${clash.employeeCode}.`);
+      }
+    }
+    if (contacts.email) {
+      const clash = await this.prisma.employee.findFirst({
+        where: { companyId, email: { equals: contacts.email, mode: 'insensitive' }, ...notSelf },
+        select: { employeeCode: true },
+      });
+      if (clash) {
+        throw new BadRequestException(`This email address is already registered to employee ${clash.employeeCode}.`);
+      }
+    }
+  }
+
   /** Ensure leave balance rows exist so employee dashboard/leave modules work on day one. */
   private async ensureDefaultLeaveBalances(companyId: string, employeeId: string) {
     const year = new Date().getFullYear();
@@ -379,6 +410,7 @@ export class EmployeesService {
       },
     });
     if (exists) throw new BadRequestException(EMPLOYEE_CODE_EXISTS_MSG);
+    await this.assertContactsAvailable(actor.companyId, { mobile: dto.mobile, email: dto.email });
 
     if (createLogin) {
       await this.assertLoginCredentialsAvailable(actor.companyId, {
@@ -565,6 +597,14 @@ export class EmployeesService {
     if (!this.isHrOrCeo(actor)) throw new ForbiddenException();
     const current = await this.getScoped(actor.companyId, id);
     this.assertNotProtectedSuperAdmin(current.user);
+    await this.assertContactsAvailable(
+      actor.companyId,
+      {
+        mobile: dto.mobile !== undefined && dto.mobile !== current.mobile ? dto.mobile : null,
+        email: dto.email !== undefined && dto.email !== current.email ? dto.email : null,
+      },
+      id,
+    );
 
     if (dto.employeeCode !== undefined) {
       const nextCode = dto.employeeCode.trim();

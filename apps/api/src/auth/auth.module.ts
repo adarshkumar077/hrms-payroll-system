@@ -5,7 +5,6 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { SecurityModule } from '../security/security.module';
-import { SmsModule } from '../sms/sms.module';
 import { OtpService } from './otp/otp.service';
 
 @Module({
@@ -13,7 +12,6 @@ import { OtpService } from './otp/otp.service';
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({}),
     forwardRef(() => SecurityModule),
-    SmsModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, OtpService],

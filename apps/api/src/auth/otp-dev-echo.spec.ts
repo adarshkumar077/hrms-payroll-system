@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { OtpService, isOtpEligible } from './otp/otp.service';
-import { SmsService } from '../sms/sms.service';
+import { MailService } from '../mail/mail.service';
 
 /**
- * The former local-development "devCode" echo has been removed: an OTP is never returned to the
- * client in any environment. Without a configured SMS provider, OTP login reports unavailable.
+ * An OTP is never returned to the client in any environment. Without configured email (SMTP),
+ * mobile OTP login reports itself unavailable instead of pretending to send.
  */
 function authWith(otp?: OtpService) {
   const prisma = { company: { findFirst: async () => ({ id: 'c1', isActive: true }) } };
@@ -15,19 +15,20 @@ function authWith(otp?: OtpService) {
 }
 
 describe('mobile OTP availability', () => {
-  test('requestOtp is unavailable (503) when no OTP service / SMS provider is configured', async () => {
+  test('requestOtp is unavailable (503) when no OTP service / email is configured', async () => {
     await assert.rejects(() => authWith().requestOtp({ mobile: '9876543210' } as any), ServiceUnavailableException);
   });
 
   for (const env of [
-    { SMS_PROVIDER: undefined },
-    { SMS_PROVIDER: 'console', OTP_SHOW_IN_UI: 'true', NODE_ENV: 'development' },
-    { SMS_PROVIDER: 'msg91' }, // provider named but credentials missing
+    {},
+    { EMAIL_PROVIDER: 'console', OTP_SHOW_IN_UI: 'true', NODE_ENV: 'development' },
+    { SMTP_HOST: 'smtp.example.com' }, // host set but no From address
+    { SMTP_FROM_EMAIL: 'hrms@example.com' }, // From set but no host
   ]) {
     test(`OTP disabled and never echoed for ${JSON.stringify(env)}`, async () => {
       const config = { get: (k: string) => (env as any)[k] ?? (k === 'JWT_ACCESS_SECRET' ? 'x'.repeat(40) : undefined) } as any;
-      const sms = new SmsService(config);
-      const otp = new OtpService({} as any, config, sms, {} as any);
+      const mail = new MailService(config);
+      const otp = new OtpService({} as any, config, mail, {} as any);
       assert.equal(otp.isEnabled(), false);
       const status = otp.status();
       assert.equal(status.enabled, false);
