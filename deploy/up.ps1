@@ -2,7 +2,14 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 
-$envFile = if (Test-Path '.env.production') { '.env.production' } else { '.env.production.example' }
+$envFile = '.env.production'
+# Never fall back to the example file: its CHANGE_ME placeholder secrets would start a real stack.
+if (-not (Test-Path $envFile)) {
+  throw "Missing $envFile. Copy .env.production.example to $envFile and set real secrets (docs/PRODUCTION_DEPLOYMENT_GUIDE.md)."
+}
+if (Select-String -Path $envFile -Pattern 'CHANGE_ME' -Quiet) {
+  throw "$envFile still contains CHANGE_ME placeholder values. Replace them before starting."
+}
 Write-Host "==> Building & starting production stack (env: $envFile)"
 
 $profiles = @()
