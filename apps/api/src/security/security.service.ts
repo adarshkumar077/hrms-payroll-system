@@ -150,9 +150,9 @@ export class SecurityService {
   }
 
   async validatePassword(companyId: string, password: string) {
-    const minLen = await this.getSettingNumber(companyId, 'security.password_min_length', 8);
-    const needUpper = await this.getSettingBool(companyId, 'security.password_require_upper', false);
-    const needNum = await this.getSettingBool(companyId, 'security.password_require_number', false);
+    const minLen = await this.getSettingNumber(companyId, 'security.password_min_length', 10);
+    const needUpper = await this.getSettingBool(companyId, 'security.password_require_upper', true);
+    const needNum = await this.getSettingBool(companyId, 'security.password_require_number', true);
     const needSpecial = await this.getSettingBool(
       companyId,
       'security.password_require_special',

@@ -65,3 +65,21 @@ export function summarizePriorPayroll(
     esiPeriodEligible,
   };
 }
+
+/** Figures entered for this FY that were paid outside this system (mid-year go-live / previous employer). */
+export type TaxOpeningBalance = {
+  taxableGross: M.MoneyInput;
+  tdsDeducted: M.MoneyInput;
+  professionalTax: M.MoneyInput;
+};
+
+/** Adds an opening balance (if any) to the in-system prior-payroll summary. */
+export function applyOpeningBalance(prior: PriorPayrollSummary, opening?: TaxOpeningBalance | null): PriorPayrollSummary {
+  if (!opening) return prior;
+  return {
+    ...prior,
+    priorTaxableGross: M.round2(M.add(prior.priorTaxableGross, M.nonNegative(M.money(opening.taxableGross)))),
+    priorTdsDeducted: M.round2(M.add(prior.priorTdsDeducted, M.nonNegative(M.money(opening.tdsDeducted)))),
+    priorProfessionalTax: M.round2(M.add(prior.priorProfessionalTax, M.nonNegative(M.money(opening.professionalTax)))),
+  };
+}

@@ -47,6 +47,8 @@ import {
 } from './payroll-calculator';
 import { isIncentiveEligible, tallyMonthAttendance, type IncentiveRules } from './incentive';
 import {
+  applyOpeningBalance,
+  financialYearOf,
   PriorPayrollLine,
   priorMonthsInEsiPeriod,
   priorMonthsInFy,
@@ -373,6 +375,14 @@ export class PayrollService {
       dto.month,
     );
     const priorByEmp = await this.priorPayrollByEmployee(user.companyId, dto.year, dto.month);
+    // Salary/TDS paid this FY outside the system (mid-year go-live), entered from source records.
+    const openingByEmp = new Map(
+      (
+        await this.prisma.employeeTaxOpeningBalance.findMany({
+          where: { companyId: user.companyId, financialYear: financialYearOf(dto.year, dto.month) },
+        })
+      ).map((o) => [o.employeeId, o]),
+    );
     const esiPeriodMonths = priorMonthsInEsiPeriod(dto.year, dto.month);
 
     const run = await this.prisma.$transaction(async (tx) => {
@@ -558,7 +568,10 @@ export class PayrollService {
             basic > 0
               ? M.nonNegative(M.sub(basic, lopAmount))
               : M.nonNegative(M.sub(M.round2(payrollCfg.grossMonthly), lopAmount));
-          const prior = summarizePriorPayroll(priorByEmp.get(emp.id) ?? [], esiPeriodMonths);
+          const prior = applyOpeningBalance(
+            summarizePriorPayroll(priorByEmp.get(emp.id) ?? [], esiPeriodMonths),
+            openingByEmp.get(emp.id),
+          );
           statutory = calcPayrollPreview({
             grossMonthly: payrollCfg.grossMonthly,
             config: cfg,

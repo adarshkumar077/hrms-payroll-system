@@ -88,13 +88,14 @@ export default function LoginPage() {
     setNeedsSetup(false);
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 3000);
-    api<{ needsSetup: boolean }>('/auth/setup/status', {
+    api<{ needsSetup: boolean; webSetupAllowed?: boolean }>('/auth/setup/status', {
       auth: false,
       retries: 0,
       timeoutMs: 3000,
       signal: controller.signal,
     })
-      .then((res) => setNeedsSetup(Boolean(res.needsSetup)))
+      // Production disables web setup (first Super Admin is created on the server console).
+      .then((res) => setNeedsSetup(Boolean(res.needsSetup) && res.webSetupAllowed !== false))
       .catch(() => setNeedsSetup(false))
       .finally(() => window.clearTimeout(timeout));
     return () => {

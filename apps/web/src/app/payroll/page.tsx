@@ -42,7 +42,8 @@ export default function PayrollPage() {
       router.replace('/');
       return;
     }
-    if (!u.roles.some((r) => ['SUPER_ADMIN', 'HR', 'ADMIN'].includes(r))) {
+    // Payroll runs are Super Admin only (matches the API).
+    if (!u.roles.includes('SUPER_ADMIN')) {
       router.replace('/dashboard');
       return;
     }

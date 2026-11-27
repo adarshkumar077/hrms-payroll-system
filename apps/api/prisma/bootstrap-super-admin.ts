@@ -15,6 +15,10 @@ import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
+if (process.env.NODE_ENV === 'production') {
+  console.error('Refusing to run in production. Use: npx tsx prisma/super-admin.ts create (generates a one-time password).');
+  process.exit(1);
+}
 async function main() {
   const loginId = process.env.SETUP_SUPER_ADMIN_LOGIN_ID?.trim() || 'SA001';
   const email = process.env.SETUP_SUPER_ADMIN_EMAIL?.trim();
@@ -27,8 +31,8 @@ async function main() {
       'Missing required env vars: SETUP_SUPER_ADMIN_EMAIL, SETUP_SUPER_ADMIN_PASSWORD, SETUP_SUPER_ADMIN_MOBILE',
     );
   }
-  if (password.length < 5) {
-    throw new Error('SETUP_SUPER_ADMIN_PASSWORD must be at least 5 characters');
+  if (password.length < 12) {
+    throw new Error('SETUP_SUPER_ADMIN_PASSWORD must be at least 12 characters');
   }
   if (email.length < 5) {
     throw new Error('SETUP_SUPER_ADMIN_EMAIL must be at least 5 characters');

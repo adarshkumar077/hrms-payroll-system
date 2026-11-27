@@ -669,7 +669,16 @@ export class AuthService {
         userRoles: { some: { role: { code: RoleCode.SUPER_ADMIN } } },
       },
     });
-    return { needsSetup: superAdminCount === 0 };
+    return { needsSetup: superAdminCount === 0, webSetupAllowed: this.webSetupAllowed() };
+  }
+
+  /**
+   * The public first-run setup page lets whoever reaches it first become Super Admin. In production
+   * it is off; the first Super Admin is created on the server console instead
+   * (prisma/super-admin.ts). ALLOW_WEB_SETUP=true re-enables it deliberately (e.g. LAN-only install).
+   */
+  private webSetupAllowed() {
+    return this.config.get<string>('NODE_ENV') !== 'production' || this.config.get<string>('ALLOW_WEB_SETUP') === 'true';
   }
 
   async setupSuperAdmin(dto: SetupSuperAdminDto, meta?: { ip?: string; ua?: string }) {
@@ -677,6 +686,11 @@ export class AuthService {
     const status = await this.getSetupStatus(companyId);
     if (!status.needsSetup) {
       throw new ForbiddenException('System is already configured.');
+    }
+    if (!status.webSetupAllowed) {
+      throw new ForbiddenException(
+        'Web setup is disabled in production. Create the first Super Admin on the server: docker compose exec api npx tsx prisma/super-admin.ts create',
+      );
     }
     if (dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Passwords do not match.');

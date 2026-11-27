@@ -6,6 +6,11 @@
 import { PrismaClient, RoleCode, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
+// Development only: creates a demo Super Admin with a KNOWN password.
+if (process.env.NODE_ENV === 'production') {
+  console.error('Refusing to run in production. Use: npx tsx prisma/super-admin.ts create (generates a one-time password).');
+  process.exit(1);
+}
 const prisma = new PrismaClient();
 
 const ROLE_DEFS: { code: RoleCode; name: string; description: string }[] = [

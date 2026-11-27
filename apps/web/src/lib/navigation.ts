@@ -120,7 +120,9 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         label: 'Payroll',
         icon: 'payroll',
         children: [
-          { id: 'payroll-runs', label: 'Payment Management', href: '/payroll', icon: 'payroll', adminRoles: ['SUPER_ADMIN', 'ADMIN', 'HR'] },
+          // Payroll runs are Super Admin only (API rule); HR/Admin manage CTC.
+          { id: 'payroll-runs', label: 'Payment Management', href: '/payroll', icon: 'payroll', adminRoles: ['SUPER_ADMIN'] },
+          { id: 'payroll-tax-opening', label: 'TDS Opening Balances', href: '/payroll/tax-opening', icon: 'payroll', adminRoles: ['SUPER_ADMIN'] },
           { id: 'payroll-ctc', label: 'CTC Assignment', href: '/payroll/ctc', icon: 'payroll', adminRoles: ['SUPER_ADMIN', 'ADMIN', 'HR'] },
           { id: 'payroll-statutory', label: 'Statutory Rules', href: '/payroll/statutory', icon: 'payroll', adminRoles: ['SUPER_ADMIN', 'ADMIN', 'HR'] },
           { id: 'payslips', label: 'My Payslips', href: '/payroll/payslips', icon: 'payroll', employee: true },
