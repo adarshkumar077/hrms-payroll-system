@@ -73,6 +73,10 @@ services:
       INTEGRATION_SECRET_KEY: ${INTEGRATION_SECRET_KEY:?Set INTEGRATION_SECRET_KEY in .env.production (to keep existing encrypted integration secrets readable, use your current JWT_ACCESS_SECRET value)}
       TRUST_PROXY: ${TRUST_PROXY:-}
       LOCAL_STORAGE_DIR: /app/apps/api/uploads
+      BACKUP_STATUS_FILE: /app/backup-status/last_status.json
+      # Monitoring: certificate served by nginx (443 when the HTTPS override is active) + host name on it
+      TLS_CHECK_HOST: ${TLS_CHECK_HOST:-}
+      TLS_CHECK_SERVERNAME: ${TLS_CHECK_SERVERNAME:-}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
       STORAGE_SIGNING_SECRET: ${STORAGE_SIGNING_SECRET:-}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-}
@@ -105,6 +109,8 @@ services:
     volumes:
       - eitf_uploads:/app/apps/api/uploads
       - eitf_backups:/app/apps/api/data
+      # Read-only view of the backup job's last_status.json (monitoring alerts on failed/stale backups)
+      - eitf_backup_status:/app/backup-status:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -210,8 +216,13 @@ services:
       BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-20}
       BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
       BACKUP_RCLONE_REMOTE: ${BACKUP_RCLONE_REMOTE:-}
+      BACKUP_STATUS_DIR: /status
+      UPLOADS_DIR: /uploads
     volumes:
       - eitf_db_backups:/backups
+      - eitf_backup_status:/status
+      # Uploaded documents / attendance selfies, read-only: archived, verified and encrypted nightly
+      - eitf_uploads:/uploads:ro
       - ${BACKUP_RCLONE_CONFIG_DIR:-./deploy/backup/rclone}:/config/rclone:ro
     logging: *default-logging
     networks: [eitf]
@@ -226,5 +237,6 @@ volumes:
   eitf_uploads:
   eitf_backups:
   eitf_db_backups:
+  eitf_backup_status:
   eitf_certbot_www:
   eitf_certbot_certs:

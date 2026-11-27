@@ -7,6 +7,7 @@ import { MoneySerializeInterceptor } from './common/money-serialize.interceptor'
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { MailModule } from './mail/mail.module';
+import { MonitoringModule } from './monitoring/monitoring.module';
 import { CompanyModule } from './company/company.module';
 import { HealthModule } from './health/health.module';
 import { AuditModule } from './audit/audit.module';
@@ -42,6 +43,7 @@ import { Require2faGuard } from './security/require-2fa.guard';
     PrismaModule,
     AuditModule,
     MailModule,
+    MonitoringModule,
     AuthModule,
     CompanyModule,
     EmployeesModule,

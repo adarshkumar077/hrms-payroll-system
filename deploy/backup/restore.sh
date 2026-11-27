@@ -4,12 +4,17 @@
 # Usage:
 #   restore.sh [--yes] <backup>
 #
-#   <backup> is either a local file (eitf_hrms_*.dump or eitf_hrms_*.dump.age) or an
+#   <backup> is either a local file (eitf_hrms_*.dump[.age] or eitf_uploads_*.tar.gz[.age]) or an
 #   rclone path such as r2:eitf-hrms-backups/eitf_hrms_20261113T200001Z.dump.age
+#
+# Database archives (eitf_hrms_*) are restored with pg_restore. Uploaded-files archives
+# (eitf_uploads_*) are extracted into UPLOADS_RESTORE_DIR, which must exist and be EMPTY
+# (restore into a fresh folder / volume, check it, then switch the app to it).
 #
 # Environment:
 #   BACKUP_AGE_IDENTITY_FILE  age private key file (required for .age backups). Keep it off the server.
 #   DATABASE_URL              target database URL, or use PGHOST/PGUSER/PGPASSWORD/PGDATABASE.
+#   UPLOADS_RESTORE_DIR       target folder for an uploads archive (must be empty).
 #   BACKUP_RCLONE_CONFIG      optional rclone config file for downloads (otherwise rclone's
 #                             defaults apply, including RCLONE_CONFIG_* env vars).
 #
@@ -54,9 +59,23 @@ if [ -z "$SRC" ]; then
 fi
 
 NAME="$(basename "$SRC")"
+KIND=db
+case "$NAME" in
+  eitf_uploads_*) KIND=uploads ;;
+esac
 
 # Work out the target and describe it without printing credentials.
-if [ -n "${DATABASE_URL:-}" ]; then
+if [ "$KIND" = uploads ]; then
+  if [ -z "${UPLOADS_RESTORE_DIR:-}" ] || [ ! -d "${UPLOADS_RESTORE_DIR:-}" ]; then
+    echo "set UPLOADS_RESTORE_DIR to an existing, empty folder" >&2
+    exit 2
+  fi
+  if [ -n "$(ls -A "$UPLOADS_RESTORE_DIR" 2>/dev/null)" ]; then
+    echo "UPLOADS_RESTORE_DIR is not empty; refusing to overwrite existing files" >&2
+    exit 2
+  fi
+  TARGET_DESC="folder ${UPLOADS_RESTORE_DIR}"
+elif [ -n "${DATABASE_URL:-}" ]; then
   TARGET_DESC="DATABASE_URL (credentials hidden)"
   TARGET_ARG="$DATABASE_URL"
 elif [ -n "${PGDATABASE:-}" ]; then
@@ -78,7 +97,11 @@ esac
 
 log "source: ${SRC}"
 log "target: ${TARGET_DESC}"
-log "action: pg_restore --clean --if-exists (DROPS and recreates objects in the target)"
+if [ "$KIND" = uploads ]; then
+  log "action: verify and extract the uploads archive into the (empty) target folder"
+else
+  log "action: pg_restore --clean --if-exists (DROPS and recreates objects in the target)"
+fi
 
 if [ "$YES" -ne 1 ]; then
   log "dry run only. Re-run with --yes to restore."
@@ -106,13 +129,22 @@ fi
 case "$NAME" in
   *.age)
     log "decrypting with age identity"
-    age -d -i "$BACKUP_AGE_IDENTITY_FILE" -o "${WORK}/restore.dump" "$FILE"
-    DUMP="${WORK}/restore.dump"
+    age -d -i "$BACKUP_AGE_IDENTITY_FILE" -o "${WORK}/restore.payload" "$FILE"
+    DUMP="${WORK}/restore.payload"
     ;;
   *)
     DUMP="$FILE"
     ;;
 esac
+
+if [ "$KIND" = uploads ]; then
+  log "verifying uploads archive"
+  tar -tzf "$DUMP" >/dev/null
+  log "extracting $(tar -tzf "$DUMP" | grep -vc '/$' || true) file(s)"
+  tar -C "$UPLOADS_RESTORE_DIR" -xzf "$DUMP"
+  log "uploads restore finished"
+  exit 0
+fi
 
 # Verify the archive is readable before touching the target.
 log "verifying archive"
