@@ -138,6 +138,8 @@ dry-run month (`FINAL_LAUNCH_REPORT.md`).
 cd /opt/eitf-hrms
 docker compose exec db-backup /bin/sh /usr/local/bin/backup.sh once     # backup first
 git fetch && git checkout <new tag>
+# Upgrading an EXISTING database to this release: must print 0 rows (no shared mobiles/emails)
+docker compose exec -T postgres psql -U eitf -d eitf_hrms < deploy/preflight/duplicate-contacts.sql
 docker compose --env-file .env.production up -d --build                  # migrations run automatically
 ```
 

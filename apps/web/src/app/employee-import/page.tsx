@@ -114,7 +114,7 @@ export default function EmployeeImportPage() {
       if (r.status === 'error') for (const e of r.errors) lines.push([r.row, r.employeeCode, 'error', e.field, e.message].map(csvCell).join(','));
       if (r.status === 'exists') lines.push([r.row, r.employeeCode, 'skipped', 'Employee ID', 'Already exists — will not be changed'].map(csvCell).join(','));
     }
-    const url = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    const url = URL.createObjectURL(new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
     a.download = 'employee-import-errors.csv';

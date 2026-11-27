@@ -78,11 +78,11 @@ describe('MonitoringService alerts', () => {
   test('emails every ALERT_EMAILS address once, then not again within 6 h', async () => {
     const { svc, sent, audits } = harness({
       BACKUP_STATUS_FILE: statusFile(goodBackup(40)),
-      ALERT_EMAILS: 'it@eitf.in, owner@eitf.in, not-an-email',
+      ALERT_EMAILS: 'it@example.test, owner@example.test, not-an-email',
     });
     const first = await svc.monitor();
     assert.ok(first.alerted.includes('backup'));
-    assert.deepEqual(sent.map((m) => m.to).sort(), ['it@eitf.in', 'owner@eitf.in']);
+    assert.deepEqual(sent.map((m) => m.to).sort(), ['it@example.test', 'owner@example.test']);
     assert.match(sent[0].text, /Backups/);
     assert.equal(audits.length, 1);
     const second = await svc.monitor();

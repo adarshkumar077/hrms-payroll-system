@@ -6,8 +6,8 @@ echo "Seeding company roles/settings; bootstrap Super Admin only if BOOTSTRAP_AD
 npx tsx prisma/seed.ts || true
 # Disabled on automatic start (production data safety). Both scripts remain in prisma/ and can be
 # run by hand when really intended:
-#   remove-demo-employees.ts deletes the login and deactivates any employee named "Mukesh Pandey"
-#     or with code EITF001 / email mukesh.pandey@eitf.local — it would hit a real employee too.
+#   remove-demo-employees.ts deletes the login and deactivates the demo employee it targets (matched by
+#     name, code or email; see the script) — it would hit a real employee with the same details too.
 #   sync-settings.ts overwrites company policy settings (office start time, grace minutes, ULOB
 #     thresholds, incentive rules…) with built-in defaults, undoing HR's changes on every restart.
 #   Manual use:  docker compose exec api npx tsx prisma/sync-settings.ts

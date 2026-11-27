@@ -41,7 +41,7 @@ describe('employee import parser', () => {
   });
 
   test('reads CSV with quotes and a BOM', async () => {
-    const csv = '﻿' + HEAD.join(',') + '\n' + 'T003,"Doe, Jane",+91 98765 43212,jane@x.in,2026-02-01,Finance,"Sr, Accountant",52000\n';
+    const csv = '\uFEFF' + HEAD.join(',') + '\n' + 'T003,"Doe, Jane",+91 98765 43212,jane@x.in,2026-02-01,Finance,"Sr, Accountant",52000\n';
     const p = await parseEmployeeFile('s.csv', Buffer.from(csv));
     const r = validateRow(2, p.rows[0].values);
     assert.equal(r.status, 'ready', JSON.stringify(r.errors));

@@ -143,7 +143,7 @@ export async function parseEmployeeFile(fileName: string, buf: Buffer): Promise<
       grid.push(vals);
     });
   } else {
-    grid = parseCsv(buf.toString('utf8').replace(/^﻿/, ''));
+    grid = parseCsv(buf.toString('utf8').replace(/^\uFEFF/, ''));
   }
   if (!grid.length) throw new Error('The file is empty.');
   const header = grid[0].map((h) => String(h ?? '').trim());

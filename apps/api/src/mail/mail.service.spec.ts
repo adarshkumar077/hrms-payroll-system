@@ -74,7 +74,7 @@ describe('MailService', () => {
 
 describe('email helpers', () => {
   test('maskEmail hides the local part', () => {
-    assert.equal(maskEmail('rahul.sharma@eitf.in'), 'r***@eitf.in');
+    assert.equal(maskEmail('ravi.kumar@example.test'), 'r***@example.test');
     assert.equal(maskEmail(null), '***');
   });
   test('isDeliverableEmail', () => {
@@ -84,9 +84,9 @@ describe('email helpers', () => {
 });
 
 describe('OTP email template', () => {
-  const t = otpEmail({ code: '482913', expiresInMinutes: 5, employeeName: '<b>Asha</b>', supportContact: 'hr@eitf.in' });
+  const t = otpEmail({ code: '482913', expiresInMinutes: 5, employeeName: '<b>Asha</b>', supportContact: 'hr@example.test' });
   test('contains the code, expiry, security warning and support contact', () => {
-    for (const part of ['482913', '5 minutes', 'never share', 'hr@eitf.in', 'Enhancing IT Infrastructure']) {
+    for (const part of ['482913', '5 minutes', 'never share', 'hr@example.test', 'Enhancing IT Infrastructure']) {
       assert.ok(t.html.includes(part), `html missing ${part}`);
       assert.ok(t.text.toLowerCase().includes(part.toLowerCase()), `text missing ${part}`);
     }
