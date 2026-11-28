@@ -63,15 +63,21 @@ password change, random initial password), and a payroll configuration with the 
 effective from the joining date. Employees sign in with **mobile OTP by email**, or HR resets their
 password.
 
+**No emails are sent by the import.** Welcome emails (portal link and sign-in steps, never a
+password) are sent by HR from each employee's onboarding record when you're ready to launch
+(Onboarding → **Send email** on the welcome task), so staff aren't contacted before launch day.
+
 ## 4. After the import
 
 * Check the totals on the result banner and in **Import history**.
 * Spot-check 5 employees: mobile, email, department, gross salary.
 * Fill in statutory details that are not in the sheet (PAN, UAN, bank account, PF/ESI/ESD options)
   on each employee's page before the first payroll run.
-* **Mid-year joiners / year-to-date TDS:** the import does **not** bring in salary or TDS already
-  paid this financial year. Do not run live payroll until that is settled (see
-  `PROJECT_FINAL_STATUS.md`, item R1).
+* **Year-to-date TDS (mid-year go-live):** the import does **not** bring in salary or TDS already
+  paid this financial year. Enter them as a Super Admin in **Payroll → TDS Opening Balances** (paste
+  Employee ID, taxable gross, TDS, PT from the old payroll; validate; save) **before the first
+  payroll run**. Your CA should verify the figures. Without them, TDS for the remaining months is
+  under-deducted.
 
 ## 5. Audit trail
 

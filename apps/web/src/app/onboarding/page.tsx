@@ -63,6 +63,18 @@ export default function OnboardingPage() {
     }
   }
 
+  /** Sends the real welcome email (portal link + sign-in steps; never a password). */
+  async function sendWelcome(employeeId: string) {
+    setError('');
+    try {
+      const r = await api<{ sentTo: string }>(`/onboarding/${employeeId}/welcome-email`, { method: 'POST', body: '{}' });
+      window.alert(`Welcome email sent to ${r.sentTo}`);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to send');
+    }
+  }
+
   async function markDone(checklistId: string, taskId: string) {
     try {
       await api(`/onboarding/${checklistId}/task/${taskId}`, {
@@ -164,7 +176,16 @@ export default function OnboardingPage() {
                     {t.title}{' '}
                     <span className="text-ink/40">({t.status})</span>
                   </span>
-                  {t.status === 'PENDING' && (
+                  {t.status === 'PENDING' && t.code === 'WELCOME_EMAIL' && (
+                    <button
+                      type="button"
+                      className="text-xs bg-brand-600 text-white px-2 py-1 rounded"
+                      onClick={() => sendWelcome(row.employee.id)}
+                    >
+                      Send email
+                    </button>
+                  )}
+                  {t.status === 'PENDING' && t.code !== 'WELCOME_EMAIL' && (
                     <button
                       type="button"
                       className="text-xs bg-brand-600 text-white px-2 py-1 rounded"
